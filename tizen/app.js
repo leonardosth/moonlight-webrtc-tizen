@@ -2,8 +2,18 @@ const GATEWAY_PROTOCOL_VERSION = 1;
 const GAMEPAD_PROTOCOL_VERSION = 1;
 const GAMEPAD_POLL_INTERVAL_MS = 1000 / 120;
 const GAMEPAD_KEEPALIVE_INTERVAL_MS = 250;
-const preferences = ClientPreferences.create();
-const gatewayStore = GatewayStore.create();
+// Every persistent value goes through one storage object so that a TV which loses
+// localStorage writes on exit loses none of them rather than an arbitrary subset.
+const durableStorage = DurableStorage.create({
+  log: function (message) { log(message); },
+});
+const preferences = ClientPreferences.create(durableStorage);
+const gatewayStore = GatewayStore.create(durableStorage);
+// The resolution list is not static in the client: it is whatever the Gateway advertises,
+// and until the first "capabilities" message arrives the markup only offers 720p and 1080p.
+// Caching the last list means the modes the Gateway actually supports - 1440p and 4K
+// included - are on screen from the moment the app opens, not once it has connected.
+const CAPABILITIES_STORAGE_KEY = "moonlight-webrtc.client.capabilities.v1";
 
 const homeScreen = document.getElementById("home-screen");
 const streamingScreen = document.getElementById("streaming-screen");
@@ -25,6 +35,9 @@ const resolutionSelect = document.getElementById("resolution-select");
 const codecSelect = document.getElementById("codec-select");
 const hdrSelect = document.getElementById("hdr-select");
 const bitrateSelect = document.getElementById("bitrate-select");
+const interpolationSelect = document.getElementById("interpolation-select");
+const interpolationStatusElement = document.getElementById("interpolation-status");
+const interpolationCanvas = document.getElementById("interpolation-canvas");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -70,6 +83,7 @@ const overlay = {
   hdr: document.getElementById("overlay-hdr"),
   gamepad: document.getElementById("overlay-gamepad"),
   connection: document.getElementById("overlay-connection"),
+  interpolation: document.getElementById("overlay-interpolation"),
 };
 
 const trackCounts = {
@@ -164,6 +178,9 @@ let videoModes = [];
 let codecSelectionWasIntentional = false;
 let updatingCodecOptions = false;
 let lastStatisticsConsoleTime = 0;
+let lastStatisticsSampleTime = 0;
+// Half the console-log period, so that log still lands on its own five-second schedule.
+const HIDDEN_STATISTICS_INTERVAL_MS = 2500;
 let applications = [];
 let ui = null;
 let artworkLoader = null;
@@ -629,6 +646,7 @@ function currentPreferenceValues() {
     hdr: hdrSelect.value === "true",
     bitrateKbps: Number.isInteger(Number(bitrateSelect.value))
       ? Number(bitrateSelect.value) : null,
+    frameInterpolation: interpolationSelect.value === "true",
   };
 }
 
@@ -636,7 +654,40 @@ function persistCurrentPreferences() {
   savedPreferences = preferences.replace(currentPreferenceValues());
 }
 
+function cacheCapabilities(message) {
+  if (!Array.isArray(message.videoModes) || message.videoModes.length === 0) {
+    return;
+  }
+  try {
+    durableStorage.setItem(CAPABILITIES_STORAGE_KEY, JSON.stringify({
+      videoModes: message.videoModes,
+      bitratesKbps: message.bitratesKbps,
+    }));
+  } catch (error) {
+    log("Unable to cache Gateway capabilities: " + errorMessage(error));
+  }
+}
+
+// Applied before any Gateway is reachable, so the cached list is treated as a hint about
+// the menu only. The live "capabilities" message replaces it wholesale on connect, and the
+// session itself is always negotiated against what the Gateway says now.
+function restoreCachedCapabilities() {
+  try {
+    const serialized = durableStorage.getItem(CAPABILITIES_STORAGE_KEY);
+    if (!serialized) {
+      return;
+    }
+    const cached = JSON.parse(serialized);
+    if (Array.isArray(cached.videoModes) && cached.videoModes.length > 0) {
+      applyCapabilities(cached);
+    }
+  } catch (error) {
+    log("Unable to restore cached Gateway capabilities: " + errorMessage(error));
+  }
+}
+
 function applyCapabilities(message) {
+  cacheCapabilities(message);
   videoModes = Array.isArray(message.videoModes) ? message.videoModes : [];
   if (videoModes.length > 0) {
     replaceSelectOptions(resolutionSelect, videoModes, {
@@ -1195,6 +1246,7 @@ function closePeerConnection() {
     track.stop();
   });
   updateTrackCounts();
+  frameInterpolation.setEnabled(false);
   videoElement.hidden = true;
   playbackPromptElement.hidden = true;
   connectionStateElement.textContent = "closed";
@@ -1213,6 +1265,55 @@ async function startPlayback() {
       log("Audio playback requires pressing OK");
     }
   }
+}
+
+const frameInterpolation = FrameInterpolation.create({
+  video: videoElement,
+  canvas: interpolationCanvas,
+  log: log,
+});
+
+const INTERPOLATION_STATUS_LABELS = {
+  off: "Off",
+  starting: "Starting",
+  probing: "Checking video access",
+  active: "On",
+  "no-headroom": "On — no spare frames",
+  unsupported: "Unavailable on this TV",
+  failed: "Stopped after an error",
+};
+
+// Second line of the same row. Empty where the label already says everything: an explanation
+// repeated under a label that carries it reads as two different pieces of information.
+const INTERPOLATION_STATUS_DETAILS = {
+  off: "costs one frame of latency",
+  unsupported: "this TV will not share video frames",
+};
+
+// Only ever runs while a stream is actually on screen and in the foreground. Leaving the
+// canvas compositing over a hidden video would keep a full-resolution draw loop alive for
+// nothing, on the one thread this app cannot afford to lose.
+function applyFrameInterpolation() {
+  frameInterpolation.setEnabled(interpolationSelect.value === "true"
+    && !streamingScreen.hidden && !document.hidden);
+  updateInterpolationStatus();
+}
+
+// Written into the interpolation row itself rather than a row of its own. Two adjacent rows
+// both reading "Off", only one of them selectable, is a menu that invites you to try to
+// select the wrong one.
+function updateInterpolationStatus() {
+  const status = frameInterpolation.status();
+  const label = INTERPOLATION_STATUS_LABELS[status.reason] || status.reason;
+  const measured = status.reason === "active" || status.reason === "no-headroom";
+  const detail = measured
+    ? String(status.sourceFps) + " → " + String(status.outputFps) + " fps, +"
+      + String(Math.round(status.addedLatencyMs)) + " ms"
+    : INTERPOLATION_STATUS_DETAILS[status.reason] || "";
+  interpolationStatusElement.textContent = detail ? label + " — " + detail : label;
+  overlay.interpolation.textContent = measured
+    ? String(status.sourceFps) + " → " + String(status.outputFps)
+    : label;
 }
 
 function updateTrackCounts() {
@@ -1254,6 +1355,7 @@ function showStreaming() {
   updateStreamOverlay();
   showOverlayTemporarily();
   startPlayback();
+  applyFrameInterpolation();
 }
 
 function showHome(view) {
@@ -1794,7 +1896,18 @@ function gamepadUiRoute() {
 function settingLabel(select) {
   const row = select && select.closest(".setting-row");
   const label = row && row.querySelector("span");
-  return label ? label.textContent : "Select value";
+  if (!label) {
+    return "Select value";
+  }
+  // A row may carry its own status line inside the same span. The picker is titled with the
+  // setting's name, not with the name and its current state run together.
+  let name = "";
+  Array.prototype.forEach.call(label.childNodes, function (node) {
+    if (node.nodeType === 3) {
+      name += node.textContent;
+    }
+  });
+  return name.trim() || label.textContent;
 }
 
 function settingsSelectorIsOpen() {
@@ -2008,16 +2121,6 @@ function goBackFromUiInput() {
     return true;
   }
 
-  if (settingsSelectorIsOpen()) {
-    if (isUp || isDown) {
-      event.preventDefault();
-      navigateUi(isDown ? "down" : "up");
-    } else if (isEnter) {
-      event.preventDefault();
-      activateFocusedControl();
-    }
-    return;
-  }
   if (ui && ui.goBack()) {
     return true;
   }
@@ -2124,6 +2227,10 @@ hdrSelect.addEventListener("change", function () {
   persistCurrentPreferences();
 });
 bitrateSelect.addEventListener("change", persistCurrentPreferences);
+interpolationSelect.addEventListener("change", function () {
+  persistCurrentPreferences();
+  applyFrameInterpolation();
+});
 
 function updateRemoteTracksForVisibility() {
   const enabled = !document.hidden;
@@ -2136,6 +2243,7 @@ function updateRemoteTracksForVisibility() {
   } else if (!enabled) {
     suspendGamepadInput(true);
   }
+  applyFrameInterpolation();
 }
 
 document.addEventListener("visibilitychange", updateRemoteTracksForVisibility);
@@ -2449,6 +2557,7 @@ const gamepadInputManager = new window.GamepadInputManager({
   log: log,
   reportError: reportError,
   diagnostics: gamepadDiagnostics,
+  isDiagnosticsVisible: diagnosticsVisible,
   overlay: overlay.gamepad,
   mouseOverlay: document.getElementById("mouse-mode-overlay"),
   onStopShortcut: handleGamepadStopShortcut,
@@ -2456,6 +2565,7 @@ const gamepadInputManager = new window.GamepadInputManager({
 });
 
 const gamepadUiNavigation = window.GamepadUiNavigation.create({
+  log: log,
   route: gamepadUiRoute,
   navigate: navigateUi,
   activate: activateFocusedControl,
@@ -2560,10 +2670,24 @@ function displayRuntimeValue(element, value) {
     : typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
+function diagnosticsVisible() {
+  return !diagnosticsElement.hidden;
+}
+
 async function updateStatistics() {
   if (!peerConnection) {
     return;
   }
+  // getStats() walks every RTP report and this then writes ~25 DOM nodes, once a second,
+  // for a panel that is hidden unless the viewer opened it. It cannot simply stop while
+  // hidden because it also emits the five-second stream diagnostics line, so it slows to
+  // the slowest cadence that still keeps that line on schedule.
+  const sampledAt = performance.now();
+  if (!diagnosticsVisible()
+      && sampledAt - lastStatisticsSampleTime < HIDDEN_STATISTICS_INTERVAL_MS) {
+    return;
+  }
+  lastStatisticsSampleTime = sampledAt;
   try {
     const reports = await peerConnection.getStats();
     let inboundVideo = null;
@@ -2724,11 +2848,21 @@ ui.setActiveGateway(null);
 ui.setSunshineState("Unknown");
 ui.setWebRtcState("Idle");
 
-setInterval(updateStatistics, 1000);
+setInterval(function () {
+  updateStatistics();
+  updateInterpolationStatus();
+}, 1000);
 updateTrackCounts();
 gamepadInputManager.updateDiagnostics();
 syncGamepadUi();
 showHome();
 gamepadUiNavigation.start();
+log("Persistent storage: " + durableStorage.describe());
+// Restored before the cached capabilities are applied: applying them persists the whole
+// preference set, and a select still holding its markup default would write that default
+// back over the saved value.
+interpolationSelect.value = savedPreferences.frameInterpolation ? "true" : "false";
+restoreCachedCapabilities();
+updateInterpolationStatus();
 renderGateways();
 probeSavedGateways();

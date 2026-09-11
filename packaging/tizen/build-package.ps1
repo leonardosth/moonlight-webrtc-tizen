@@ -37,6 +37,8 @@ try {
         'app.js',
         'application-artwork.js',
         'config.xml',
+        'durable-storage.js',
+        'frame-interpolation.js',
         'gamepad-input.js',
         'gamepad-ui-navigation.js',
         'gateway-ipv4.js',

@@ -86,6 +86,26 @@ int runningSunshineApplicationId(const gateway::moonlight::SunshineServerInfo& s
     return gateway::moonlight::SunshineHttpClient::runningApplicationId(serverInfo);
 }
 
+gateway::managementipc::Result classifySunshineDetectionFailure(const std::exception& error)
+{
+    // Detection reports transport, TLS and protocol faults through one exception type,
+    // so the message is the only signal left for a code the UI can act on. Callers must
+    // apply this to detection alone: reporting an unrelated local failure as
+    // "unreachable" sends the user hunting for a network problem that does not exist.
+    const std::string detail = error.what();
+    const bool tls = detail.find("certificate") != std::string::npos
+        || detail.find("SSL") != std::string::npos || detail.find("TLS") != std::string::npos;
+    const bool protocol = detail.find("XML") != std::string::npos
+        || detail.find("status") != std::string::npos;
+    if (tls) {
+        return {false, "tls-pinning-failed", "Sunshine TLS or certificate pinning failed"};
+    }
+    if (protocol) {
+        return {false, "protocol-failed", "Sunshine responded with an invalid protocol response"};
+    }
+    return {false, "unreachable", "Sunshine is unreachable"};
+}
+
 void requestShutdown(int)
 {
     ConsoleShutdownRequested = 1;
@@ -161,9 +181,15 @@ ProgramOptions parseProgramOptions(int argc, char** argv)
         } else {
             throw std::invalid_argument(
                 "Usage: moonlight_webrtc [--source=test|--source=moonlight] "
-                "[--host=<host>] [--app=<name>] [--pair] [--console|--service] "
+                "[--host=<host>[:<port>]] [--app=<name>] [--pair] [--console|--service] "
                 "[--data-dir=<path>] [--migrate-data-from=<path>]");
         }
+    }
+
+    if (options.host
+        && !gateway::moonlight::MoonlightIdentity::isValidSunshineEndpoint(*options.host)) {
+        throw std::invalid_argument(
+            "--host expects a hostname or IPv4 address, optionally followed by :port");
     }
 
     if (options.sourceMode != MediaSourceMode::Moonlight
@@ -1017,7 +1043,7 @@ private:
             throw std::runtime_error("Moonlight WebRTC Gateway is not paired with Sunshine");
         }
 
-        gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+        gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
         client.setHttpsPort(detected.serverInfo.httpsPort);
         client.setPinnedServerCertificate(
             detected.pairedHost->serverCertificatePem);
@@ -1062,7 +1088,7 @@ private:
             }
             hostId = detected.serverInfo.uniqueId;
 
-            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
             client.setHttpsPort(detected.serverInfo.httpsPort);
             client.setPinnedServerCertificate(detected.pairedHost->serverCertificatePem);
             auto applications = client.getAppList();
@@ -1125,8 +1151,9 @@ public:
             return {false, "unsupported-source", "Sunshine management requires the Moonlight source"};
         }
         if (command.type == gateway::managementipc::CommandType::SetHost) {
-            if (!gateway::moonlight::MoonlightIdentity::isValidSunshineHost(command.host)) {
-                return {false, "invalid-host", "Enter a hostname or IPv4 address without a URL or port"};
+            if (!gateway::moonlight::MoonlightIdentity::isValidSunshineEndpoint(command.host)) {
+                return {false, "invalid-host",
+                        "Enter a hostname or IPv4 address without a URL, optionally followed by :port"};
             }
             try {
                 identity_->saveConfiguredSunshineHost(command.host);
@@ -1158,27 +1185,30 @@ public:
         if (command.type != gateway::managementipc::CommandType::Test) {
             return {false, "unsupported-command", "Unsupported Sunshine management command"};
         }
+        // Test the address the request carries so the button reports on what the user
+        // typed. Testing only the saved value made an unsaved host look unreachable.
+        std::optional<std::string> testedHost = configuredMoonlightOptions().host;
+        if (!command.host.empty()) {
+            if (!gateway::moonlight::MoonlightIdentity::isValidSunshineEndpoint(command.host)) {
+                return {false, "invalid-host",
+                        "Enter a hostname or IPv4 address without a URL, optionally followed by :port"};
+            }
+            testedHost = command.host;
+        }
+
         try {
             const auto detected = gateway::moonlight::MoonlightSession::detectSunshine(
-                *identity_, configuredMoonlightOptions().host, [](const std::string&) {});
+                *identity_, testedHost, [](const std::string&) {});
             if (!detected.pairedHost || detected.serverInfo.pairStatus != 1) {
                 return {false, "not-paired", "Sunshine is reachable but this Gateway is not paired"};
             }
-            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
             client.setHttpsPort(detected.serverInfo.httpsPort);
             client.setPinnedServerCertificate(detected.pairedHost->serverCertificatePem);
             (void)client.getServerInfo(true, std::chrono::seconds(5));
             return {true, "reachable", "Sunshine is reachable and its pinned TLS connection succeeded"};
         } catch (const std::exception& error) {
-            const std::string detail = error.what();
-            const bool tls = detail.find("certificate") != std::string::npos
-                || detail.find("SSL") != std::string::npos || detail.find("TLS") != std::string::npos;
-            const bool protocol = detail.find("XML") != std::string::npos
-                || detail.find("status") != std::string::npos;
-            return {false, tls ? "tls-pinning-failed" : protocol ? "protocol-failed" : "unreachable",
-                    tls ? "Sunshine TLS or certificate pinning failed" : protocol
-                        ? "Sunshine responded with an invalid protocol response"
-                        : "Sunshine is unreachable"};
+            return classifySunshineDetectionFailure(error);
         }
     }
 
@@ -1214,8 +1244,11 @@ public:
             snapshot.sunshineConnected = true;
             snapshot.sunshinePaired = detected.pairedHost.has_value()
                 && detected.serverInfo.pairStatus == 1;
+            // Report the server name separately. Overwriting the configured address with
+            // it fed Sunshine's display name back into the tray's address box, so saving
+            // that page stored a name no resolver can answer for.
             if (!detected.serverInfo.hostname.empty()) {
-                snapshot.sunshineHost = detected.serverInfo.hostname;
+                snapshot.sunshineName = detected.serverInfo.hostname;
             }
             const int runningAppId = runningSunshineApplicationId(detected.serverInfo);
             if (runningAppId != 0) {
@@ -1247,16 +1280,25 @@ private:
         }
         if (joinFinishedPairing) pairingThread_.join();
 
+        // Classify detection separately. A single catch around the whole body reported
+        // PIN generation and thread-start failures as "Sunshine is unreachable", which
+        // pointed the user at the network for a fault that was never there.
+        gateway::moonlight::DetectedSunshine detected;
         try {
-            const auto detected = gateway::moonlight::MoonlightSession::detectSunshine(
+            detected = gateway::moonlight::MoonlightSession::detectSunshine(
                 *identity_, configuredMoonlightOptions().host, [](const std::string&) {});
-            if (detected.pairedHost && detected.serverInfo.pairStatus == 1) {
-                return {false, "already-paired", "This Gateway is already paired with Sunshine"};
-            }
-            if (detected.serverInfo.pairStatus == 1) {
-                return {false, "pairing-state-unknown", "Sunshine reports pairing but local trust is unavailable; pairing was not replaced"};
-            }
+        } catch (const std::exception& error) {
+            return classifySunshineDetectionFailure(error);
+        }
 
+        if (detected.pairedHost && detected.serverInfo.pairStatus == 1) {
+            return {false, "already-paired", "This Gateway is already paired with Sunshine"};
+        }
+        if (detected.serverInfo.pairStatus == 1) {
+            return {false, "pairing-state-unknown", "Sunshine reports pairing but local trust is unavailable; pairing was not replaced"};
+        }
+
+        try {
             const std::string pin = gateway::moonlight::MoonlightPairing::generatePin();
             {
                 std::lock_guard lock(pairingMutex_);
@@ -1266,7 +1308,7 @@ private:
             pairingThread_ = std::thread([this, detected, pin] {
                 gateway::managementipc::Result result;
                 try {
-                    gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+                    gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
                     client.setHttpsPort(detected.serverInfo.httpsPort);
                     gateway::moonlight::MoonlightPairing pairing(*identity_, client);
                     const auto outcome = pairing.pair(detected.serverInfo.appVersion, pin);
@@ -1279,7 +1321,8 @@ private:
                     } else {
                         gateway::moonlight::PairedSunshineHost host{
                             detected.serverInfo.uniqueId, detected.serverInfo.hostname, detected.address,
-                            detected.serverInfo.httpsPort, outcome.serverCertificatePem};
+                            detected.serverInfo.httpsPort, outcome.serverCertificatePem,
+                            detected.httpPort};
                         identity_->savePairedHost(host);
                         client.setPinnedServerCertificate(outcome.serverCertificatePem);
                         const auto verified = client.getServerInfo(true, std::chrono::seconds(5));
@@ -1298,7 +1341,11 @@ private:
             });
             return {true, "pairing-started", "Enter this PIN in Sunshine to continue pairing", pin};
         } catch (const std::exception&) {
-            return {false, "unreachable", "Sunshine is unreachable"};
+            {
+                std::lock_guard lock(pairingMutex_);
+                pairingInProgress_ = false;
+            }
+            return {false, "pairing-start-failed", "Sunshine was reached but pairing could not be started"};
         }
     }
 
@@ -1319,7 +1366,7 @@ private:
             if (!detected.pairedHost || detected.serverInfo.pairStatus != 1) {
                 return {false, "not-paired", "This Gateway is not paired with Sunshine"};
             }
-            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
             client.setHttpsPort(detected.serverInfo.httpsPort);
             client.setPinnedServerCertificate(detected.pairedHost->serverCertificatePem);
             if (!identity_->removePairedHost(detected.serverInfo.uniqueId)) {
@@ -1637,7 +1684,7 @@ private:
                 throw std::runtime_error("Moonlight WebRTC Gateway is not paired with Sunshine");
             }
 
-            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address);
+            gateway::moonlight::SunshineHttpClient client(*identity_, detected.address, detected.httpPort);
             client.setHttpsPort(detected.serverInfo.httpsPort);
             client.setPinnedServerCertificate(detected.pairedHost->serverCertificatePem);
 
@@ -1923,7 +1970,7 @@ int runMoonlightPairing(const ProgramOptions& options)
     auto detected = gateway::moonlight::MoonlightSession::detectSunshine(
         identity, options.host, logger);
     auto httpClient = std::make_unique<gateway::moonlight::SunshineHttpClient>(
-        identity, detected.address);
+        identity, detected.address, detected.httpPort);
     httpClient->setHttpsPort(detected.serverInfo.httpsPort);
     if (detected.pairedHost) {
         httpClient->setPinnedServerCertificate(
@@ -1959,6 +2006,7 @@ int runMoonlightPairing(const ProgramOptions& options)
             detected.address,
             detected.serverInfo.httpsPort,
             outcome.serverCertificatePem,
+            detected.httpPort,
         };
         identity.savePairedHost(host);
         detected.pairedHost = host;

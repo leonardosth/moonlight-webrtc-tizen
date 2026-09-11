@@ -340,6 +340,11 @@ Open the **Moonlight WebRTC** tray application.
 
 Go to **Sunshine**, configure the Sunshine host and select **Test Connection**.
 
+The host field takes the address of the machine running Sunshine — a hostname or an IPv4
+address, such as `192.168.1.20`. This is not the name Sunshine displays for itself, which
+is only a label. If Sunshine runs on a non-default port, append it: `192.168.1.20:27786`.
+Use the base HTTP port from Sunshine's own configuration; the Gateway derives the rest.
+
 Then select **Pair** and complete the PIN pairing with Sunshine.
 
 Pairing normally only needs to be performed once.

@@ -16,8 +16,12 @@ snapshot; the service replies with a little-endian 32-bit JSON-byte length follo
 versioned JSON response. For example:
 
 ```json
-{"version":1,"type":"status","serviceRunning":true,"sunshineConnected":true,"sunshinePaired":true,"sunshineHost":"Sunshine-PC","runningApplicationId":"7","runningApplicationName":"Desktop","sessionActive":false,"connectedTvClients":0}
+{"version":1,"type":"status","serviceRunning":true,"sunshineConnected":true,"sunshinePaired":true,"sunshineHost":"192.168.1.20:27786","sunshineName":"Sunshine-PC","runningApplicationId":"7","runningApplicationName":"Desktop","sessionActive":false,"connectedTvClients":0}
 ```
+
+`sunshineHost` is the configured address the Gateway dials, including a custom port when
+one was set. `sunshineName` is the name Sunshine reports for itself; it is a label and is
+not necessarily resolvable, so it is never fed back into the address field.
 
 Unavailable fields are omitted. The endpoint exposes no private key, certificate, pairing
 material, credential, token, or control command. Its protected ACL grants full access only

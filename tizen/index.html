@@ -8,6 +8,7 @@
 </head>
 <body>
   <video id="video" autoplay playsinline hidden></video>
+  <canvas id="interpolation-canvas" hidden></canvas>
   <main id="home-screen" class="app-shell" aria-label="Moonlight WebRTC Client">
     <header id="top-bar" class="top-bar">
       <button id="top-back-button" class="top-back-button focusable" type="button" hidden aria-label="Back"><span aria-hidden="true">&#8592;</span></button>
@@ -46,6 +47,7 @@
           <label class="setting-row" for="hdr-select"><span>HDR</span><select id="hdr-select" class="setting-select focusable"><option value="false">Off</option></select></label>
           <label class="setting-row" for="bitrate-select"><span>Bitrate</span><select id="bitrate-select" class="setting-select focusable"><option value="10000">10 Mbps</option><option value="12000" selected>12 Mbps</option><option value="15000">15 Mbps</option><option value="20000">20 Mbps</option><option value="25000">25 Mbps</option><option value="30000">30 Mbps</option></select></label>
           <div class="setting-row setting-row-readonly" aria-label="FPS: 60 FPS, fixed"><span>FPS</span><span class="setting-value"><strong>60 FPS</strong><small>Fixed</small></span></div>
+          <label class="setting-row" for="interpolation-select"><span>Frame interpolation<small id="interpolation-status" class="setting-note">Off — costs one frame of latency</small></span><select id="interpolation-select" class="setting-select focusable"><option value="false">Off</option><option value="true">On — Experimental</option></select></label>
         </section>
         <section class="settings-panel" data-settings-panel="audio" hidden aria-label="Audio settings"><div class="setting-row setting-row-readonly"><span>Audio</span><span class="setting-value"><strong>Stereo</strong><small>48 kHz Opus</small></span></div></section>
         <section class="settings-panel" data-settings-panel="input" hidden aria-label="Input settings">
@@ -88,7 +90,7 @@
   </section>
 
   <section id="streaming-screen" class="streaming-screen" hidden aria-label="Streaming session">
-    <aside id="stream-overlay" class="stream-overlay"><h2 id="overlay-app">Desktop</h2><dl class="stream-facts"><div><dt>Resolution</dt><dd id="overlay-resolution">-</dd></div><div><dt>FPS</dt><dd id="overlay-fps">60</dd></div><div><dt>Codec</dt><dd id="overlay-codec">H.264</dd></div><div><dt>Bitrate</dt><dd id="overlay-bitrate">-</dd></div><div><dt>HDR</dt><dd id="overlay-hdr">Off</dd></div><div><dt>Gamepad</dt><dd id="overlay-gamepad">Disconnected</dd></div><div><dt>Connection</dt><dd id="overlay-connection">Starting</dd></div></dl></aside>
+    <aside id="stream-overlay" class="stream-overlay"><h2 id="overlay-app">Desktop</h2><dl class="stream-facts"><div><dt>Resolution</dt><dd id="overlay-resolution">-</dd></div><div><dt>FPS</dt><dd id="overlay-fps">60</dd></div><div><dt>Codec</dt><dd id="overlay-codec">H.264</dd></div><div><dt>Bitrate</dt><dd id="overlay-bitrate">-</dd></div><div><dt>HDR</dt><dd id="overlay-hdr">Off</dd></div><div><dt>Gamepad</dt><dd id="overlay-gamepad">Disconnected</dd></div><div><dt>Connection</dt><dd id="overlay-connection">Starting</dd></div><div><dt>Interpolation</dt><dd id="overlay-interpolation">Off</dd></div></dl></aside>
     <div id="stream-menu" class="stream-menu" hidden><section class="menu-panel" aria-label="Stream menu"><h2>Streaming</h2><div class="menu-actions"><button id="continue-button" class="menu-button focusable" type="button">Resume</button><button id="diagnostics-button" class="menu-button focusable" type="button">Show statistics</button><button id="stop-button" class="menu-button menu-button-danger focusable" type="button">Stop streaming</button></div><p class="menu-hint"><kbd>OK</kbd> Select <kbd class="back-key">&#8592;</kbd> Resume</p></section></div>
   </section>
 
@@ -102,6 +104,8 @@
   <div id="playback-prompt" class="playback-prompt" hidden>Press OK to start audio</div>
   <script src="gamepad-input.js"></script>
   <script src="gamepad-ui-navigation.js"></script>
+  <script src="frame-interpolation.js"></script>
+  <script src="durable-storage.js"></script>
   <script src="preferences.js"></script>
   <script src="gateway-store.js"></script>
   <script src="gateway-ipv4.js"></script>
