@@ -9,6 +9,12 @@ const durableStorage = DurableStorage.create({
 });
 const preferences = ClientPreferences.create(durableStorage);
 const gatewayStore = GatewayStore.create(durableStorage);
+const wakeOnLan = WakeOnLan.create({ log: function (message) { log(message); } });
+// How long a woken PC may take to boot and start the Gateway service before the TV gives up.
+const GATEWAY_WAKE_TIMEOUT_MS = 120000;
+// A sleeping PC never answers the TCP handshake, and the retransmissions back off to a minute
+// or more, so each attempt is cut short to reconnect promptly once the PC is up.
+const GATEWAY_WAKE_ATTEMPT_TIMEOUT_MS = 5000;
 // The resolution list is not static in the client: it is whatever the Gateway advertises,
 // and until the first "capabilities" message arrives the markup only offers 720p and 1080p.
 // Caching the last list means the modes the Gateway actually supports - 1440p and 4K
@@ -57,6 +63,7 @@ const gatewayEditorCancelButton = document.getElementById("gateway-editor-cancel
 const gatewayEditorConnectButton = document.getElementById("gateway-editor-connect");
 const gatewayContextMenu = document.getElementById("gateway-context-menu");
 const gatewayContextHeading = document.getElementById("gateway-context-heading");
+const gatewayWakeButton = document.getElementById("gateway-wake-button");
 const gatewayEditButton = document.getElementById("gateway-edit-button");
 const gatewayRemoveButton = document.getElementById("gateway-remove-button");
 const gatewayRemoveDialog = document.getElementById("gateway-remove-dialog");
@@ -199,6 +206,9 @@ let gatewayContextGatewayId = null;
 let gatewayRemoveGatewayId = null;
 let gatewayConnectionToken = 0;
 let openApplicationsAfterConnection = false;
+// The Gateway being woken: { gatewayId, name, timer }. Its connection attempts are expected
+// to fail until the PC has booted, so they are reported as waiting rather than as errors.
+let gatewayWake = null;
 const gatewayRuntimeStates = new Map();
 const gatewayProbeIds = new Set();
 
@@ -247,8 +257,27 @@ function gatewayWebSocketUrl(gateway) {
 
 function gatewayEntries() {
   return savedGateways.map(function (gateway) {
-    return Object.assign({}, gateway, { state: gatewayRuntimeStates.get(gateway.id) || "Offline" });
+    const state = gatewayRuntimeStates.get(gateway.id) || "Offline";
+    return Object.assign({}, gateway, {
+      state: gatewayWakeIsActive(gateway.id) && state !== "Online" ? "Waking" : state,
+    });
   });
+}
+
+// The status message carries the MAC address of the Gateway adapter this TV reaches it
+// through; keeping it is what allows the TV to wake that PC once it is off.
+function gatewayWithStatus(gateway, message) {
+  const macAddress = WakeOnLan.normalizeMacAddress(message && message.macAddress);
+  return macAddress ? Object.assign({}, gateway, { macAddress: macAddress }) : Object.assign({}, gateway);
+}
+
+function learnGatewayMacAddress(gatewayId, message) {
+  const stored = gatewayStore.find(gatewayId);
+  const updated = stored ? gatewayWithStatus(stored, message) : null;
+  if (updated && updated.macAddress !== stored.macAddress) {
+    gatewayStore.upsert(updated);
+    savedGateways = gatewayStore.list();
+  }
 }
 
 function renderGateways() {
@@ -286,12 +315,12 @@ function resetGatewayData() {
   }
 }
 
-function refreshStoredGatewayName(message) {
+function refreshStoredGateway(message) {
   if (!activeGateway) {
     return;
   }
   const name = gatewayDisplayName(message);
-  const updated = gatewayStore.upsert(Object.assign({}, activeGateway, { name: name }));
+  const updated = gatewayStore.upsert(gatewayWithStatus(Object.assign({}, activeGateway, { name: name }), message));
   if (updated) {
     activeGateway = updated;
     savedGateways = gatewayStore.list();
@@ -347,11 +376,11 @@ function completeGatewayValidation(message) {
     return;
   }
   if (!pendingGatewayValidation) {
-    refreshStoredGatewayName(message);
+    refreshStoredGateway(message);
     return;
   }
   const pending = pendingGatewayValidation;
-  const candidate = Object.assign({}, activeGateway, { name: gatewayDisplayName(message) });
+  const candidate = gatewayWithStatus(Object.assign({}, activeGateway, { name: gatewayDisplayName(message) }), message);
   const saved = pending.mode === "edit"
     ? gatewayStore.replace(pending.previousId, candidate)
     : gatewayStore.upsert(candidate);
@@ -429,7 +458,8 @@ function connectGateway(gateway) {
   setGatewayRuntimeState(activeGateway.id, "Connecting");
 
   gatewayStateElement.textContent = "Connecting";
-  setHomeMessage("Connecting to Gateway...", false);
+  setHomeMessage(gatewayWakeIsActive(activeGateway.id)
+    ? "Waiting for " + gatewayWake.name + " to wake up..." : "Connecting to Gateway...", false);
   try {
     socket = new WebSocket(gatewayWebSocketUrl(activeGateway));
   } catch (error) {
@@ -439,7 +469,18 @@ function connectGateway(gateway) {
     return;
   }
 
+  let wakeAttemptTimer = null;
+  if (gatewayWakeIsActive(activeGateway.id)) {
+    const attemptSocket = socket;
+    wakeAttemptTimer = setTimeout(function () {
+      if (attemptSocket.readyState === WebSocket.CONNECTING) {
+        attemptSocket.close();
+      }
+    }, GATEWAY_WAKE_ATTEMPT_TIMEOUT_MS);
+  }
+
   socket.addEventListener("open", function () {
+    clearTimeout(wakeAttemptTimer);
     if (token !== gatewayConnectionToken) {
       return;
     }
@@ -453,6 +494,7 @@ function connectGateway(gateway) {
   });
 
   socket.addEventListener("close", function () {
+    clearTimeout(wakeAttemptTimer);
     if (token !== gatewayConnectionToken) {
       return;
     }
@@ -464,6 +506,15 @@ function connectGateway(gateway) {
     sessionState = "idle";
     sessionStateElement.textContent = "Idle";
     closePeerConnection();
+    // A PC that is still booting refuses connections; retry quietly, leaving the user where
+    // they are rather than returning them to the Gateway list on every attempt.
+    if (activeGateway && gatewayWakeIsActive(activeGateway.id)) {
+      setGatewayRuntimeState(activeGateway.id, "Offline");
+      setHomeMessage("Waiting for " + gatewayWake.name + " to wake up...", false);
+      updatePlayAvailability();
+      reconnectTimer = setTimeout(function () { connectGateway(activeGateway); }, 2000);
+      return;
+    }
     showHome();
     if (gatewayValidationFailed("Unable to connect to Gateway at " + gatewayAddress())) {
       return;
@@ -521,6 +572,7 @@ function probeGateway(gateway) {
       try {
         const message = JSON.parse(event.data);
         if (message.version === GATEWAY_PROTOCOL_VERSION && message.type === "gateway-status") {
+          learnGatewayMacAddress(gateway.id, message);
           complete("Online");
         }
       } catch (error) {
@@ -592,6 +644,7 @@ function handleGatewayStatus(message) {
     setRunningApplication(message.runningAppId);
   }
   if (activeGateway) {
+    finishGatewayWake(activeGateway.id);
     setGatewayRuntimeState(activeGateway.id, "Online");
     completeGatewayValidation(message);
     if (ui) {
@@ -1429,6 +1482,7 @@ function focusFirstHomeControl() {
 
 function closeActiveGatewayConnection() {
   gatewayConnectionToken += 1;
+  cancelGatewayWake();
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -1453,10 +1507,89 @@ function activateGateway(gatewayId) {
     ui.showApplications();
     return;
   }
+  if (gatewayWakeIsActive(gateway.id)) {
+    showNotification("Waking " + gateway.name, "Waiting for the PC to start...", false);
+    return;
+  }
+  // Choosing a PC that is off means the user wants it on, so wake it when the TV can.
+  if (gateway.macAddress && gatewayRuntimeStates.get(gateway.id) === "Offline" && wakeOnLan.isSupported()) {
+    wakeGateway(gateway.id);
+    return;
+  }
   closeActiveGatewayConnection();
   activeGateway = gateway;
   openApplicationsAfterConnection = true;
   connectGateway(gateway);
+}
+
+function gatewayWakeIsActive(gatewayId) {
+  return Boolean(gatewayWake && gatewayWake.gatewayId === gatewayId);
+}
+
+function cancelGatewayWake() {
+  if (gatewayWake) {
+    clearTimeout(gatewayWake.timer);
+    gatewayWake = null;
+  }
+}
+
+function finishGatewayWake(gatewayId) {
+  if (!gatewayWakeIsActive(gatewayId)) {
+    return;
+  }
+  const name = gatewayWake.name;
+  cancelGatewayWake();
+  showNotification(name + " is awake", "Loading Sunshine applications...", false);
+}
+
+function gatewayWakeTimedOut(gatewayId) {
+  if (!gatewayWakeIsActive(gatewayId)) {
+    return;
+  }
+  const name = gatewayWake.name;
+  closeActiveGatewayConnection();
+  setGatewayRuntimeState(gatewayId, "Offline");
+  const message = name + " did not wake up. Check that Wake-on-LAN is enabled on the PC.";
+  setHomeMessage(message, true);
+  showNotification("PC did not wake up", message, true);
+}
+
+// Sends the magic packet and keeps connecting until the Gateway answers or the PC has had
+// GATEWAY_WAKE_TIMEOUT_MS to boot. Sending it again to a PC that is already on is harmless.
+function wakeGateway(gatewayId) {
+  const gateway = gatewayStore.find(gatewayId);
+  if (!gateway || sessionState !== "idle") {
+    return false;
+  }
+  if (!gateway.macAddress) {
+    showNotification("Wake PC unavailable",
+      "Connect to " + gateway.name + " once while the PC is on so the TV can learn how to wake it.", true);
+    return false;
+  }
+  closeActiveGatewayConnection();
+  activeGateway = gateway;
+  openApplicationsAfterConnection = true;
+  gatewayWake = {
+    gatewayId: gateway.id,
+    name: gateway.name,
+    timer: setTimeout(function () { gatewayWakeTimedOut(gateway.id); }, GATEWAY_WAKE_TIMEOUT_MS),
+  };
+  log("Sending Wake-on-LAN to " + gateway.name + " (" + gateway.macAddress + ")");
+  wakeOnLan.wake(gateway.macAddress, gateway.host).then(function (result) {
+    log("Wake-on-LAN sent " + result.sent + " packet(s) to " + gateway.name);
+    if (gatewayWakeIsActive(gateway.id)) {
+      showNotification("Waking " + gateway.name, "Waiting for the PC to start...", false);
+    }
+  }).catch(function (error) {
+    log("Wake-on-LAN failed for " + gateway.name + ": " + errorMessage(error));
+    if (gatewayWakeIsActive(gateway.id)) {
+      cancelGatewayWake();
+      renderGateways();
+    }
+    showNotification("Unable to wake " + gateway.name, errorMessage(error), true);
+  });
+  connectGateway(gateway);
+  return true;
 }
 
 function gatewayEditorIsOpen() {
@@ -1633,9 +1766,16 @@ function openGatewayContextMenu() {
   }
   gatewayContextGatewayId = gateway.id;
   gatewayContextHeading.textContent = gateway.name;
+  gatewayWakeButton.hidden = !gateway.macAddress || gatewayRuntimeStates.get(gateway.id) === "Online";
   gatewayContextMenu.hidden = false;
-  gatewayEditButton.focus();
+  (gatewayWakeButton.hidden ? gatewayEditButton : gatewayWakeButton).focus();
   return true;
+}
+
+function wakeGatewayFromContextMenu() {
+  const gatewayId = gatewayContextGatewayId;
+  closeGatewayContextMenu();
+  wakeGateway(gatewayId);
 }
 
 function openGatewayRemoveDialog() {
@@ -2031,6 +2171,10 @@ function activateFocusedControl() {
     return gatewayOctetButtons.indexOf(active) >= 0;
   }
   if (gatewayContextMenuIsOpen()) {
+    if (active === gatewayWakeButton) {
+      wakeGatewayFromContextMenu();
+      return true;
+    }
     if (active === gatewayEditButton) {
       const gatewayId = gatewayContextGatewayId;
       closeGatewayContextMenu();
@@ -2821,6 +2965,7 @@ gatewayEditorCancelButton.addEventListener("click", function () {
   closeGatewayEditor();
 });
 gatewayEditorConnectButton.addEventListener("click", connectGatewayFromEditor);
+gatewayWakeButton.addEventListener("click", wakeGatewayFromContextMenu);
 gatewayEditButton.addEventListener("click", function () {
   const gatewayId = gatewayContextGatewayId;
   closeGatewayContextMenu();

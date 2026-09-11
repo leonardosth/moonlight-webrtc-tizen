@@ -58,8 +58,27 @@ the Gateway identity or ProgramData directory, and does not claim Sunshine-side 
 Opening the WebSocket does not start Sunshine or WebRTC. The Gateway first sends:
 
 ```json
-{"version":1,"type":"gateway-status","gatewayName":"Sunshine-PC","sunshineDetected":true,"sunshinePaired":true,"sessionActive":false}
+{"version":1,"type":"gateway-status","gatewayName":"Sunshine-PC","sunshineDetected":true,"sunshinePaired":true,"sessionActive":false,"macAddress":"2C:F0:5D:7B:E6:D0"}
 ```
+
+`macAddress` is the Wake-on-LAN address of the Gateway PC: the MAC address of the local
+adapter Windows routes to this TV through, in upper-case colon form. It is omitted when that
+adapter has no Ethernet-style address (loopback, some virtual adapters). The TV stores it with
+the saved Gateway and later wakes the PC itself: the Gateway cannot, since it is asleep too.
+
+### Wake-on-LAN
+
+A Tizen web application cannot send UDP from JavaScript, so the TV sends the magic packet from
+a small WebAssembly module (`tizen/wasm/wake-on-lan.c`) built with Samsung's Emscripten fork,
+whose Tizen Sockets extension provides POSIX sockets. Those sockets are refused on the browser
+main thread, so each request runs on its own pthread. One request sends the standard 102-byte
+magic packet to UDP port 9 at the IPv4 limited broadcast `255.255.255.255`, at the Gateway's
+last known IPv4 address, and at the IPv6 all-nodes group `ff02::1`; it succeeds when at least
+one of those sends does.
+
+Selecting an offline Gateway whose address is known wakes it, as does **Wake PC** in its
+menu. The TV then keeps reconnecting, with 5-second attempts, for up to two minutes while the
+PC boots, and opens the application library once `gateway-status` arrives.
 
 It also sends `capabilities`. Protocol version 1 advertises explicit `videoModes` so the
 TV never has to infer a resolution/codec combination. Each mode contains `width`,

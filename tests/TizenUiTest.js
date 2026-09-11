@@ -7,6 +7,7 @@ const path = require("path");
 global.window = global;
 require("../tizen/ui.js");
 require("../tizen/preferences.js");
+require("../tizen/wake-on-lan.js");
 require("../tizen/gateway-store.js");
 require("../tizen/gateway-ipv4.js");
 require("../tizen/application-artwork.js");
@@ -257,5 +258,21 @@ referencedScripts.forEach(function (name) {
   assert.ok(packagingScript.includes("'" + name + "'"),
     name + " is loaded by index.html but is not packaged into the widget");
 });
+
+assert.ok(html.indexOf('src="wake-on-lan.js"') >= 0
+  && html.indexOf('src="wake-on-lan.js"') < html.indexOf('src="gateway-store.js"'),
+  "the Gateway store validates Wake-on-LAN addresses, so wake-on-lan.js must load first");
+assert.ok(html.includes('id="gateway-wake-button"') && html.includes('type="button" hidden>Wake PC</button>'),
+  "the Gateway menu must offer Wake PC, hidden until the Gateway's address is known");
+assert.ok(packagingScript.includes("build-wake-on-lan.ps1") && packagingScript.includes("'wasm'"),
+  "the widget must package the Wake-on-LAN WebAssembly module next to its loader");
+assert.ok(appSource.includes("learnGatewayMacAddress(gateway.id, message);"),
+  "Gateway probes must remember the address needed to wake each saved PC");
+assert.ok(appSource.includes('gatewayRuntimeStates.get(gateway.id) === "Offline" && wakeOnLan.isSupported()'),
+  "selecting an offline Gateway must wake it when the TV can");
+assert.ok(appSource.includes("if (activeGateway && gatewayWakeIsActive(activeGateway.id)) {\n      setGatewayRuntimeState"),
+  "failed attempts while a PC boots must retry quietly instead of reporting a disconnect");
+assert.ok(appSource.includes("if (active === gatewayWakeButton) {"),
+  "remote OK and gamepad A must activate Wake PC through the shared menu action");
 
 console.log("Tizen UI tests passed");

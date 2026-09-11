@@ -13,6 +13,7 @@
 #include "moonlight/control/MoonlightSession.h"
 #include "moonlight/control/SunshineHttpClient.h"
 #include "moonlight/input/MoonlightInputBridge.h"
+#include "platform/WakeOnLanAddress.h"
 #include "session/StreamSettings.h"
 #include "webrtc/SamsungSdp.h"
 #include "webrtc/WebRtcMediaSender.h"
@@ -267,6 +268,7 @@ struct Session {
     std::uint64_t sessionId = 0;
     gateway::StreamSettings settings = gateway::defaultStreamSettings();
     std::optional<int> applicationId;
+    std::optional<std::string> wakeOnLanMacAddress;
     bool streamingActive = false;
 
     std::mutex sendMutex;
@@ -399,6 +401,7 @@ private:
         session->socket->onOpen([this, weakSession] {
             if (const auto currentSession = weakSession.lock()) {
                 log("WebSocket client connected");
+                resolveWakeOnLanAddress(currentSession);
                 sendInitialState(currentSession);
             }
         });
@@ -995,6 +998,18 @@ private:
         log("Audio streaming stopped");
     }
 
+    void resolveWakeOnLanAddress(const std::shared_ptr<Session>& session)
+    {
+        const auto peerAddress = session->socket->remoteAddress();
+        auto macAddress = peerAddress
+            ? gateway::platform::wakeOnLanMacAddressForPeer(*peerAddress)
+            : std::nullopt;
+        log(macAddress ? "Wake-on-LAN address for this client: " + *macAddress
+                       : std::string("Wake-on-LAN address unavailable for this client"));
+        const std::lock_guard lock(session->streamMutex);
+        session->wakeOnLanMacAddress = std::move(macAddress);
+    }
+
     gateway::protocol::GatewayStatus gatewayStatus(
         const std::shared_ptr<Session>& session)
     {
@@ -1002,6 +1017,7 @@ private:
         {
             const std::lock_guard lock(session->streamMutex);
             status.sessionActive = session->sessionId != 0;
+            status.macAddress = session->wakeOnLanMacAddress;
         }
 
         if (sourceMode_ == MediaSourceMode::Test) {
