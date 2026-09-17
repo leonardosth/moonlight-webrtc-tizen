@@ -204,15 +204,21 @@ Json makeCapabilities()
     message["resolutions"] = Json::array();
     for (const auto& mode : SupportedVideoModes) {
         message["videoModes"].push_back(videoModeJson(mode));
-        message["resolutions"].push_back({
-            {"width", mode.width},
-            {"height", mode.height},
-            {"experimental", mode.experimental},
-        });
+        const bool alreadyAdded = std::ranges::any_of(
+            message["resolutions"], [&](const auto& r) {
+                return r["width"] == mode.width && r["height"] == mode.height;
+            });
+        if (!alreadyAdded) {
+            message["resolutions"].push_back({
+                {"width", mode.width},
+                {"height", mode.height},
+                {"experimental", mode.experimental},
+            });
+        }
     }
     message.update({
-        {"frameRates", {60}},
-        {"codecs", {"h264", "hevc"}},
+        {"frameRates", {60, 120}},
+        {"codecs", {"h264", "hevc", "av1"}},
         {"hdr", true},
         {"audio", "stereo"},
         {"audioSampleRate", 48000},
@@ -221,7 +227,11 @@ Json makeCapabilities()
          {{"720p60", 12000},
           {"1080p60", 20000},
           {"1440p60", 30000},
-          {"2160p60", 50000}}},
+          {"2160p60", 50000},
+          {"720p120", 20000},
+          {"1080p120", 40000},
+          {"1440p120", 50000},
+          {"2160p120", 70000}}},
     });
     return message;
 }

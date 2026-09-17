@@ -4,6 +4,7 @@
   const STORAGE_KEY = "moonlight-webrtc.client.preferences.v1";
   const DEFAULTS = Object.freeze({
     resolution: null,
+    fps: null,
     codec: null,
     hdr: false,
     bitrateKbps: null,
@@ -13,6 +14,7 @@
   function copyDefaults() {
     return {
       resolution: DEFAULTS.resolution,
+      fps: DEFAULTS.fps,
       codec: DEFAULTS.codec,
       hdr: DEFAULTS.hdr,
       bitrateKbps: DEFAULTS.bitrateKbps,
@@ -27,6 +29,9 @@
     }
     if (typeof candidate.resolution === "string") {
       values.resolution = candidate.resolution;
+    }
+    if (Number.isInteger(candidate.fps) && candidate.fps > 0) {
+      values.fps = candidate.fps;
     }
     if (typeof candidate.codec === "string") {
       values.codec = candidate.codec;

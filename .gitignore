@@ -13,3 +13,9 @@ tizen/wasm/*.mem
 /.tizen-install/
 /tizen/Release/
 /dist/
+/vcpkg_installed/
+pkg-config.exe
+pkgconf.exe
+scratch_pkgconf.*
+*.obj
+*.log

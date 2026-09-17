@@ -42,6 +42,19 @@ int main()
         require(std::dynamic_pointer_cast<rtc::H264RtpPacketizer>(hevcPacketizer)
                     == nullptr,
                 "HEVC selected the H.264 packetizer");
+
+        auto av1Configuration = std::make_shared<rtc::RtpPacketizationConfig>(
+            44, "test", 96, 90000);
+        auto av1Packetizer = gateway::makeVideoRtpPacketizer(
+            gateway::VideoCodec::AV1, av1Configuration);
+        require(std::dynamic_pointer_cast<rtc::AV1RtpPacketizer>(av1Packetizer)
+                    != nullptr,
+                "AV1 did not select rtc::AV1RtpPacketizer");
+        require(std::dynamic_pointer_cast<rtc::H264RtpPacketizer>(av1Packetizer)
+                    == nullptr
+                    && std::dynamic_pointer_cast<rtc::H265RtpPacketizer>(av1Packetizer)
+                        == nullptr,
+                "AV1 selected H.264 or HEVC packetizer");
         require(h264Configuration->clockRate == 90000
                     && hevcConfiguration->clockRate == 90000,
                 "Video RTP clock is not 90000 Hz");

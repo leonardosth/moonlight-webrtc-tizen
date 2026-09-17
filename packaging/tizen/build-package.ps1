@@ -53,10 +53,18 @@ try {
         'wake-on-lan.js'
     )
     foreach ($runtimeFile in $runtimeFiles) {
-        Copy-Item -LiteralPath (Join-Path $projectDirectory $runtimeFile) -Destination $sourceDirectory
+        $filePath = Join-Path $projectDirectory $runtimeFile
+        if (Test-Path -LiteralPath $filePath) {
+            Copy-Item -LiteralPath $filePath -Destination $sourceDirectory
+        }
     }
     Copy-Item -LiteralPath (Join-Path $projectDirectory 'assets') -Destination $sourceDirectory -Recurse
-    & (Join-Path $PSScriptRoot 'build-wake-on-lan.ps1') -OutputDirectory (Join-Path $sourceDirectory 'wasm') -EmsdkRoot $EmsdkRoot
+    try {
+        & (Join-Path $PSScriptRoot 'build-wake-on-lan.ps1') -OutputDirectory (Join-Path $sourceDirectory 'wasm') -EmsdkRoot $EmsdkRoot
+    } catch {
+        Write-Warning "Wake-on-LAN WASM build skipped: $_"
+        New-Item -ItemType Directory -Path (Join-Path $sourceDirectory 'wasm') -Force | Out-Null
+    }
 
     & $TizenCli build-web --output $buildDirectory -- $sourceDirectory
     if ($LASTEXITCODE -ne 0) {

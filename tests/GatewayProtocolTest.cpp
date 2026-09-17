@@ -61,14 +61,38 @@ int main()
         const auto settings1080 = gateway::defaultStreamSettings(1920, 1080);
         const auto settingsHevc1080 = gateway::defaultStreamSettings(
             1920, 1080, gateway::VideoCodec::HEVC);
+        const auto settingsAv1_1080 = gateway::defaultStreamSettings(
+            1920, 1080, gateway::VideoCodec::AV1);
         const auto settings1440 = gateway::defaultStreamSettings(2560, 1440);
         const auto settings4k = gateway::defaultStreamSettings(3840, 2160);
+        auto settings720_120 = gateway::defaultStreamSettings(
+            1280, 720, gateway::VideoCodec::H264);
+        settings720_120.fps = 120;
+        settings720_120.bitrateKbps = 20000;
+        auto settings1080_120 = gateway::defaultStreamSettings(
+            1920, 1080, gateway::VideoCodec::HEVC);
+        settings1080_120.fps = 120;
+        settings1080_120.bitrateKbps = 40000;
+        auto settings1440_120 = gateway::defaultStreamSettings(
+            2560, 1440, gateway::VideoCodec::HEVC);
+        settings1440_120.fps = 120;
+        settings1440_120.bitrateKbps = 50000;
+        auto settings4k_120 = gateway::defaultStreamSettings(
+            3840, 2160, gateway::VideoCodec::HEVC);
+        settings4k_120.fps = 120;
+        settings4k_120.bitrateKbps = 70000;
         auto settingsHdr1080 = settingsHevc1080;
         settingsHdr1080.hdr = true;
+        auto settingsHdrAv1_1080 = settingsAv1_1080;
+        settingsHdrAv1_1080.hdr = true;
         auto settingsHdr1440 = settings1440;
         settingsHdr1440.hdr = true;
         auto settingsHdr4k = settings4k;
         settingsHdr4k.hdr = true;
+        auto settingsHdr1440_120 = settings1440_120;
+        settingsHdr1440_120.hdr = true;
+        auto settingsHdr4k_120 = settings4k_120;
+        settingsHdr4k_120.hdr = true;
         require(!gateway::validateStreamSettings(settings720)
                     && settings720.bitrateKbps == 12000,
                 "Valid 720p60 settings were rejected");
@@ -77,6 +101,22 @@ int main()
                 "Valid 1080p60 settings were rejected");
         require(!gateway::validateStreamSettings(settingsHevc1080),
                 "Valid HEVC 1080p60 settings were rejected");
+        require(!gateway::validateStreamSettings(settingsAv1_1080),
+                "Valid AV1 1080p60 settings were rejected");
+        require(!gateway::validateStreamSettings(settings720_120)
+                    && settings720_120.fps == 120,
+                "Valid 720p120 settings were rejected");
+        require(!gateway::validateStreamSettings(settings1080_120)
+                    && settings1080_120.fps == 120,
+                "Valid 1080p120 settings were rejected");
+        require(!gateway::validateStreamSettings(settings1440_120)
+                    && settings1440_120.fps == 120
+                    && settings1440_120.bitrateKbps == 50000,
+                "Valid 1440p120 settings were rejected");
+        require(!gateway::validateStreamSettings(settings4k_120)
+                    && settings4k_120.fps == 120
+                    && settings4k_120.bitrateKbps == 70000,
+                "Valid 4K120 settings were rejected");
         require(!gateway::validateStreamSettings(settings1440)
                     && settings1440.codec == gateway::VideoCodec::HEVC
                     && settings1440.bitrateKbps == 30000,
@@ -86,9 +126,12 @@ int main()
                     && settings4k.bitrateKbps == 50000,
                 "Valid/default HEVC 4K60 settings are incorrect");
         require(!gateway::validateStreamSettings(settingsHdr1080)
+                    && !gateway::validateStreamSettings(settingsHdrAv1_1080)
                     && !gateway::validateStreamSettings(settingsHdr1440)
-                    && !gateway::validateStreamSettings(settingsHdr4k),
-                "Valid 1080p/1440p/4K HEVC HDR settings were rejected");
+                    && !gateway::validateStreamSettings(settingsHdr4k)
+                    && !gateway::validateStreamSettings(settingsHdr1440_120)
+                    && !gateway::validateStreamSettings(settingsHdr4k_120),
+                "Valid 1080p/1440p/4K HEVC/AV1 HDR settings were rejected");
 
         auto invalid = settings720;
         invalid.width = 1366;
@@ -337,22 +380,36 @@ int main()
             "a=rtpmap:96 H264/90000\r\n"
             "a=fmtp:96 packetization-mode=1\r\n"
             "a=" + imageAttribute1080 + "\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        const std::string av1Sdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "a=" + imageAttribute1080 + "\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
         require(gateway::hasExpectedVideoCodec(
                     hevcSdp, gateway::VideoCodec::HEVC),
                 "HEVC SDP codec validation failed");
         require(gateway::hasExpectedVideoCodec(
                     h264Sdp, gateway::VideoCodec::H264),
                 "H.264 SDP codec validation failed");
+        require(gateway::hasExpectedVideoCodec(
+                    av1Sdp, gateway::VideoCodec::AV1),
+                "AV1 SDP codec validation failed");
         require(!gateway::hasExpectedVideoCodec(
                     h264Sdp, gateway::VideoCodec::HEVC),
                 "H.264 SDP was accepted for HEVC");
+        require(!gateway::hasExpectedVideoCodec(
+                    h264Sdp, gateway::VideoCodec::AV1),
+                "H.264 SDP was accepted for AV1");
         require(gateway::hevcFormatParameters(settingsHevc1080) == std::nullopt
                     && gateway::hevcFormatParameters(settingsHdr1080)
                         == "profile-id=2;tier-flag=0;level-id=123"
                     && gateway::hevcFormatParameters(settingsHdr1440)
                         == "profile-id=2;tier-flag=0;level-id=150"
                     && gateway::hevcFormatParameters(settingsHdr4k)
-                        == "profile-id=2;tier-flag=0;level-id=153",
+                        == "profile-id=2;tier-flag=0;level-id=153"
+                    && gateway::hevcFormatParameters(settingsHdr1440_120)
+                        == "profile-id=2;tier-flag=0;level-id=153"
+                    && gateway::hevcFormatParameters(settingsHdr4k_120)
+                        == "profile-id=2;tier-flag=0;level-id=156",
                 "HEVC Main10 SDP format parameters are incorrect");
         const std::string hdrMain10Sdp =
             "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
@@ -399,10 +456,10 @@ int main()
 
         const auto capabilities = gateway::protocol::makeCapabilities();
         require(capabilities.at("resolutions").size() == 4
-                    && capabilities.at("videoModes").size() == 4
-                    && capabilities.at("frameRates") == nlohmann::json::array({60})
+                    && capabilities.at("videoModes").size() == 8
+                    && capabilities.at("frameRates") == nlohmann::json::array({60, 120})
                     && capabilities.at("codecs")
-                        == nlohmann::json::array({"h264", "hevc"})
+                        == nlohmann::json::array({"h264", "hevc", "av1"})
                     && capabilities.at("hdr").get<bool>()
                     && capabilities.at("audio") == "stereo",
                 "Advertised capabilities are incorrect");

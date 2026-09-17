@@ -87,16 +87,18 @@ TV never has to infer a resolution/codec combination. Each mode contains `width`
 
 | Mode | Codecs | HDR | Default | Default bitrate | Experimental |
 | --- | --- | --- | --- | ---: | --- |
-| 1280x720 @ 60 | H.264, HEVC | Off | H.264 | 12000 kbps | No |
-| 1920x1080 @ 60 | H.264, HEVC | Off, On | H.264 | 20000 kbps | HDR only |
-| 2560x1440 @ 60 | H.264, HEVC | Off, On | HEVC | 30000 kbps | Yes |
-| 3840x2160 @ 60 | HEVC | Off, On | HEVC | 50000 kbps | HDR only |
+| 1280x720 @ 60 | H.264, HEVC, AV1 | Off | H.264 | 12000 kbps | No |
+| 1920x1080 @ 60 | H.264, HEVC, AV1 | Off, On | H.264 | 20000 kbps | HDR only |
+| 2560x1440 @ 60 | H.264, HEVC, AV1 | Off, On | HEVC | 30000 kbps | Yes |
+| 3840x2160 @ 60 | HEVC, AV1 | Off, On | HEVC | 50000 kbps | HDR only |
+| 1280x720 @ 120 | H.264, HEVC, AV1 | Off | H.264 | 20000 kbps | Yes |
+| 1920x1080 @ 120 | H.264, HEVC, AV1 | Off, On | HEVC | 40000 kbps | Yes |
 
-The selectable bitrates are 10000, 12000, 15000, 20000, 25000, 30000, 40000, and
-50000 kbps. HDR defaults to off and is experimental when explicitly selected with HEVC.
-Audio remains stereo Opus at 48 kHz and frame rate remains fixed at 60 fps. The entire
-1440p mode, including HDR, is experimental because Samsung does not list it in the
-official Cloud Gaming resolution table.
+The selectable bitrates are 10000, 12000, 15000, 20000, 25000, 30000, 40000, 50000,
+60000, 70000, 80000, 90000, and 100000 kbps (10–100 Mbps). HDR defaults to off and is supported
+when explicitly selected with HEVC or AV1. Audio remains stereo Opus at 48 kHz. Frame rate
+supports 60 fps standard and 120 fps experimental modes. The entire 1440p mode and 120 fps
+modes are experimental.
 
 ## Applications
 

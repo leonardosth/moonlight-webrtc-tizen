@@ -645,7 +645,9 @@ private:
         });
 
         rtc::Description::Video video("video", rtc::Description::Direction::SendOnly);
-        if (settings.codec == gateway::VideoCodec::HEVC) {
+        if (settings.codec == gateway::VideoCodec::AV1) {
+            video.addAV1Codec(VideoPayloadType);
+        } else if (settings.codec == gateway::VideoCodec::HEVC) {
             video.addH265Codec(
                 VideoPayloadType, gateway::hevcFormatParameters(settings));
         } else {

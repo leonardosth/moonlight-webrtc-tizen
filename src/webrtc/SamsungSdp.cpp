@@ -110,15 +110,30 @@ bool hasExpectedVideoCodec(std::string_view sdp,
         return false;
     }
     const auto payload = std::to_string(payloadType);
-    const auto expected = "a=rtpmap:" + payload + " "
-        + (codec == VideoCodec::HEVC ? "H265/90000" : "H264/90000");
+    std::string codecName;
+    switch (codec) {
+    case VideoCodec::H264:
+        codecName = "H264/90000";
+        break;
+    case VideoCodec::HEVC:
+        codecName = "H265/90000";
+        break;
+    case VideoCodec::AV1:
+        codecName = "AV1/90000";
+        break;
+    }
+    const auto expected = "a=rtpmap:" + payload + " " + codecName;
     if (section.find(expected) == std::string_view::npos) {
         return false;
     }
-    if (codec == VideoCodec::HEVC) {
-        return section.find("H264/90000") == std::string_view::npos;
+    // Verify no other video codecs are present in the answer.
+    const std::array otherCodecs = { "H264/90000", "H265/90000", "AV1/90000" };
+    for (const auto& other : otherCodecs) {
+        if (other != codecName && section.find(other) != std::string_view::npos) {
+            return false;
+        }
     }
-    return section.find("H265/90000") == std::string_view::npos;
+    return true;
 }
 
 std::optional<std::string> hevcFormatParameters(const StreamSettings& settings)
@@ -131,9 +146,9 @@ std::optional<std::string> hevcFormatParameters(const StreamSettings& settings)
     }
     int levelId = 123;
     if (settings.width == 2560) {
-        levelId = 150;
+        levelId = settings.fps == 120 ? 153 : 150;
     } else if (settings.width == 3840) {
-        levelId = 153;
+        levelId = settings.fps == 120 ? 156 : 153;
     }
     return "profile-id=2;tier-flag=0;level-id=" + std::to_string(levelId);
 }

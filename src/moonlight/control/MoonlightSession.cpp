@@ -216,7 +216,7 @@ STREAM_CONFIGURATION MoonlightSession::createStreamConfiguration(
     configuration.streamingRemotely = STREAM_CFG_LOCAL;
     configuration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
     configuration.supportedVideoFormats = profile.videoFormat;
-    configuration.clientRefreshRateX100 = 6000;
+    configuration.clientRefreshRateX100 = settings.fps * 100;
     configuration.colorSpace = profile.colorSpace;
     configuration.colorRange = profile.colorRange;
     configuration.encryptionFlags = ENCFLG_ALL;

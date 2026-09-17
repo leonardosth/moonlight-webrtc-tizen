@@ -11,6 +11,7 @@ namespace gateway {
 enum class VideoCodec {
     H264,
     HEVC,
+    AV1,
 };
 
 struct VideoMode {
@@ -19,6 +20,7 @@ struct VideoMode {
     int fps;
     bool supportsH264;
     bool supportsHevc;
+    bool supportsAv1;
     VideoCodec defaultCodec;
     int defaultBitrateKbps;
     bool experimental;
@@ -38,10 +40,16 @@ struct StreamSettings {
 };
 
 inline constexpr std::array SupportedVideoModes{
-    VideoMode{1280, 720, 60, true, true, VideoCodec::H264, 12000, false, false},
-    VideoMode{1920, 1080, 60, true, true, VideoCodec::H264, 20000, false, true},
-    VideoMode{2560, 1440, 60, true, true, VideoCodec::HEVC, 30000, true, true},
-    VideoMode{3840, 2160, 60, false, true, VideoCodec::HEVC, 50000, false, true},
+    // 60 fps modes
+    VideoMode{1280,  720, 60, true,  true,  true,  VideoCodec::H264, 12000, false, false},
+    VideoMode{1920, 1080, 60, true,  true,  true,  VideoCodec::H264, 20000, false, true},
+    VideoMode{2560, 1440, 60, true,  true,  true,  VideoCodec::HEVC, 30000, true,  true},
+    VideoMode{3840, 2160, 60, false, true,  true,  VideoCodec::HEVC, 50000, false, true},
+    // 120 fps modes (experimental)
+    VideoMode{1280,  720, 120, true,  true,  true,  VideoCodec::H264, 20000, true, false},
+    VideoMode{1920, 1080, 120, true,  true,  true,  VideoCodec::HEVC, 40000, true, true},
+    VideoMode{2560, 1440, 120, true,  true,  true,  VideoCodec::HEVC, 50000, true, true},
+    VideoMode{3840, 2160, 120, false, true,  true,  VideoCodec::HEVC, 70000, true, true},
 };
 
 inline constexpr std::array SupportedBitratesKbps{
@@ -53,6 +61,11 @@ inline constexpr std::array SupportedBitratesKbps{
     30000,
     40000,
     50000,
+    60000,
+    70000,
+    80000,
+    90000,
+    100000,
 };
 
 const VideoMode* findVideoMode(int width, int height, int fps = 60);

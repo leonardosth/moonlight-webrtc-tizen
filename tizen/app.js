@@ -38,6 +38,7 @@ const applicationsScreen = document.getElementById("applications-screen");
 const settingsScreen = document.getElementById("settings-screen");
 const appSelect = document.getElementById("app-select");
 const resolutionSelect = document.getElementById("resolution-select");
+const fpsSelect = document.getElementById("fps-select");
 const codecSelect = document.getElementById("codec-select");
 const hdrSelect = document.getElementById("hdr-select");
 const bitrateSelect = document.getElementById("bitrate-select");
@@ -72,6 +73,7 @@ const gatewayRemoveCancelButton = document.getElementById("gateway-remove-cancel
 const gatewayRemoveConfirmButton = document.getElementById("gateway-remove-confirm");
 const playButton = document.getElementById("play-button");
 const continueButton = document.getElementById("continue-button");
+const statsOverlayButton = document.getElementById("stats-overlay-button");
 const diagnosticsButton = document.getElementById("diagnostics-button");
 const stopButton = document.getElementById("stop-button");
 const homeMessage = document.getElementById("home-message");
@@ -97,6 +99,17 @@ const trackCounts = {
   remote: document.getElementById("remote-tracks"),
   video: document.getElementById("video-tracks"),
   audio: document.getElementById("audio-tracks"),
+};
+
+const streamStatsOverlay = document.getElementById("stream-stats-overlay");
+const streamStats = {
+  fps: document.getElementById("stats-fps"),
+  decodeTime: document.getElementById("stats-decode-time"),
+  rtt: document.getElementById("stats-rtt"),
+  dropped: document.getElementById("stats-dropped"),
+  bitrate: document.getElementById("stats-bitrate"),
+  packetLoss: document.getElementById("stats-packet-loss"),
+  jitter: document.getElementById("stats-jitter"),
 };
 
 const statistics = {
@@ -173,6 +186,7 @@ let selectedSession = null;
 let overlayTimer = null;
 let statisticsErrorReported = false;
 let previousDecodedSample = null;
+let previousBytesSample = null;
 let playbackErrorReported = false;
 let controlDataChannel = null;
 let gamepadDataChannel = null;
@@ -695,6 +709,7 @@ function selectSavedOrDefault(select, savedValue, defaultValue) {
 function currentPreferenceValues() {
   return {
     resolution: resolutionSelect.value || null,
+    fps: Number.isInteger(Number(fpsSelect.value)) ? Number(fpsSelect.value) : null,
     codec: codecSelect.value || null,
     hdr: hdrSelect.value === "true",
     bitrateKbps: Number.isInteger(Number(bitrateSelect.value))
@@ -743,13 +758,22 @@ function applyCapabilities(message) {
   cacheCapabilities(message);
   videoModes = Array.isArray(message.videoModes) ? message.videoModes : [];
   if (videoModes.length > 0) {
-    replaceSelectOptions(resolutionSelect, videoModes, {
+    const uniqueResolutions = [];
+    const seen = {};
+    videoModes.forEach(function (mode) {
+      const key = String(mode.width) + "x" + String(mode.height);
+      if (!seen[key]) {
+        seen[key] = true;
+        uniqueResolutions.push(mode);
+      }
+    });
+    replaceSelectOptions(resolutionSelect, uniqueResolutions, {
       value: function (mode) {
         return String(mode.width) + "x" + String(mode.height);
       },
       label: function (mode) {
         const base = String(mode.width) + " × " + String(mode.height);
-        if (mode.experimental) {
+        if (mode.width === 2560 && mode.height === 1440) {
           return base + " — Experimental";
         }
         return mode.width === 3840 && mode.height === 2160 ? base + " — 4K" : base;
@@ -769,12 +793,23 @@ function applyCapabilities(message) {
 }
 
 function selectedVideoMode() {
+  const currentFps = Number(fpsSelect.value) || 60;
+  const resolution = resolutionSelect.value;
+  const exactMatch = videoModes.find(function (mode) {
+    return String(mode.width) + "x" + String(mode.height) === resolution && mode.fps === currentFps;
+  });
+  if (exactMatch) {
+    return exactMatch;
+  }
   return videoModes.find(function (mode) {
-    return String(mode.width) + "x" + String(mode.height) === resolutionSelect.value;
+    return String(mode.width) + "x" + String(mode.height) === resolution;
   }) || null;
 }
 
 function codecDisplayName(codec) {
+  if (codec === "av1") {
+    return "AV1 — Experimental (No TV HW)";
+  }
   return codec === "hevc" ? "HEVC (H.265)" : "H.264";
 }
 
@@ -794,12 +829,45 @@ function updateHdrOptions(mode, preferredHdr) {
     onOption.textContent = mode.hdrExperimental ? "On — Experimental" : "On";
     hdrSelect.appendChild(onOption);
   }
-  hdrSelect.value = hdrWasEnabled && supportsHdr && codecSelect.value === "hevc"
+  const allowsHdrCodec = codecSelect.value === "hevc" || codecSelect.value === "av1";
+  hdrSelect.value = hdrWasEnabled && supportsHdr && allowsHdrCodec
     ? "true"
     : "false";
 }
 
+function updateFpsOptions(resolutionKey, preferredFps) {
+  const matchingModes = videoModes.filter(function (mode) {
+    return String(mode.width) + "x" + String(mode.height) === resolutionKey;
+  });
+  const availableFps = matchingModes.map(function (m) { return m.fps; });
+  if (availableFps.length === 0) {
+    availableFps.push(60);
+  }
+  const fpsItems = availableFps.map(function (fps) {
+    return {
+      value: String(fps),
+      label: fps === 120 ? "120 FPS — Experimental" : String(fps) + " FPS",
+    };
+  });
+  const currentFps = typeof preferredFps !== "undefined" && preferredFps !== null
+    ? String(preferredFps)
+    : fpsSelect.value;
+  replaceSelectOptions(fpsSelect, fpsItems, {
+    value: function (item) { return item.value; },
+    label: function (item) { return item.label; },
+  });
+  if (availableFps.indexOf(Number(currentFps)) >= 0) {
+    fpsSelect.value = String(currentFps);
+  } else {
+    fpsSelect.value = String(availableFps[0]);
+  }
+}
+
 function applySelectedVideoMode(preferencesToRestore) {
+  updateFpsOptions(
+    resolutionSelect.value,
+    preferencesToRestore ? preferencesToRestore.fps : undefined
+  );
   const mode = selectedVideoMode();
   if (!mode || !Array.isArray(mode.codecs) || mode.codecs.length === 0) {
     return;
@@ -823,7 +891,11 @@ function applySelectedVideoMode(preferencesToRestore) {
     String(mode.defaultBitrateKbps)
   );
   if (mode.experimental) {
-    setHomeMessage("2560 × 1440 is experimental on Samsung Tizen.", false);
+    if (mode.fps === 120) {
+      setHomeMessage(String(mode.width) + " × " + String(mode.height) + " @ 120 FPS is experimental.", false);
+    } else {
+      setHomeMessage("2560 × 1440 is experimental on Samsung Tizen.", false);
+    }
   } else if (appsLoaded) {
     setHomeMessage("Choose video settings in Settings, then launch an application.", false);
   }
@@ -1077,7 +1149,7 @@ function selectedSettings() {
     appTitle: appSelect.options[appSelect.selectedIndex].textContent,
     width: Number(dimensions[0]),
     height: Number(dimensions[1]),
-    fps: 60,
+    fps: Number(fpsSelect.value) || 60,
     codec: codecSelect.value,
     bitrateKbps: Number(bitrateSelect.value),
     hdr: hdrSelect.value === "true",
@@ -1141,6 +1213,7 @@ function createPeerConnection(sessionId) {
   currentSessionId = sessionId;
   pendingRemoteCandidates = [];
   previousDecodedSample = null;
+  previousBytesSample = null;
   statisticsErrorReported = false;
 
   try {
@@ -1418,6 +1491,8 @@ function showHome(view) {
   streamMenu.hidden = true;
   diagnosticsElement.hidden = true;
   diagnosticsButton.textContent = "Show statistics";
+  streamStatsOverlay.hidden = true;
+  statsOverlayButton.textContent = "Show stats overlay";
   updatePlayAvailability();
   if (ui) {
     if (view === "applications") {
@@ -1450,6 +1525,12 @@ function handleGamepadStopShortcut() {
   }
 }
 
+function handleGamepadStatsShortcut() {
+  if (sessionState === "streaming") {
+    toggleStatsOverlay();
+  }
+}
+
 function handleMouseModeChanged(record, active) {
   const controller = record.moonlightSlot === null
     ? record.controllerId : record.moonlightSlot + 1;
@@ -1465,6 +1546,20 @@ function toggleDiagnostics() {
   diagnosticsButton.textContent = diagnosticsElement.hidden
     ? "Show statistics"
     : "Hide statistics";
+}
+
+function toggleStatsOverlay() {
+  streamStatsOverlay.hidden = !streamStatsOverlay.hidden;
+  statsOverlayButton.textContent = streamStatsOverlay.hidden
+    ? "Show stats overlay"
+    : "Hide stats overlay";
+  if (!streamStatsOverlay.hidden) {
+    updateStatistics();
+  }
+}
+
+function statsOverlayVisible() {
+  return streamStatsOverlay && !streamStatsOverlay.hidden;
 }
 
 function focusableElements(container) {
@@ -2336,6 +2431,7 @@ document.addEventListener("keydown", function (event) {
 
 playButton.addEventListener("click", startSelectedSession);
 continueButton.addEventListener("click", hideStreamMenu);
+statsOverlayButton.addEventListener("click", toggleStatsOverlay);
 diagnosticsButton.addEventListener("click", toggleDiagnostics);
 stopButton.addEventListener("click", stopCurrentSession);
 resumeSessionButton.addEventListener("click", resumeRunningApplication);
@@ -2346,18 +2442,22 @@ resolutionSelect.addEventListener("change", function () {
   applySelectedVideoMode();
   persistCurrentPreferences();
 });
+fpsSelect.addEventListener("change", function () {
+  applySelectedVideoMode();
+  persistCurrentPreferences();
+});
 codecSelect.addEventListener("change", function () {
   if (!updatingCodecOptions) {
     codecSelectionWasIntentional = true;
   }
-  if (codecSelect.value !== "hevc") {
+  if (codecSelect.value !== "hevc" && codecSelect.value !== "av1") {
     hdrSelect.value = "false";
   }
   updateHdrOptions(selectedVideoMode());
   persistCurrentPreferences();
 });
 hdrSelect.addEventListener("change", function () {
-  if (hdrSelect.value === "true" && codecSelect.value !== "hevc") {
+  if (hdrSelect.value === "true" && codecSelect.value !== "hevc" && codecSelect.value !== "av1") {
     codecSelect.value = "hevc";
     codecSelectionWasIntentional = true;
   }
@@ -2705,6 +2805,7 @@ const gamepadInputManager = new window.GamepadInputManager({
   overlay: overlay.gamepad,
   mouseOverlay: document.getElementById("mouse-mode-overlay"),
   onStopShortcut: handleGamepadStopShortcut,
+  onStatsShortcut: handleGamepadStatsShortcut,
   onMouseModeChanged: handleMouseModeChanged,
 });
 
@@ -2827,7 +2928,7 @@ async function updateStatistics() {
   // hidden because it also emits the five-second stream diagnostics line, so it slows to
   // the slowest cadence that still keeps that line on schedule.
   const sampledAt = performance.now();
-  if (!diagnosticsVisible()
+  if (!diagnosticsVisible() && !statsOverlayVisible()
       && sampledAt - lastStatisticsSampleTime < HIDDEN_STATISTICS_INTERVAL_MS) {
     return;
   }
@@ -2836,6 +2937,8 @@ async function updateStatistics() {
     const reports = await peerConnection.getStats();
     let inboundVideo = null;
     let inboundAudio = null;
+    let activeCandidatePair = null;
+    let remoteInboundVideo = null;
     const codecReports = {};
     reports.forEach(function (report) {
       const kind = typeof report.kind === "undefined" ? report.mediaType : report.kind;
@@ -2843,10 +2946,26 @@ async function updateStatistics() {
         inboundVideo = report;
       } else if (report.type === "inbound-rtp" && kind === "audio" && !report.isRemote) {
         inboundAudio = report;
+      } else if (report.type === "candidate-pair" && (report.state === "succeeded" || report.nominated || report.selected)) {
+        activeCandidatePair = report;
+      } else if (report.type === "remote-inbound-rtp" && kind === "video") {
+        remoteInboundVideo = report;
       } else if (report.type === "codec" && report.id) {
         codecReports[report.id] = report;
       }
     });
+
+    let networkRttMs = null;
+    if (activeCandidatePair) {
+      if (typeof activeCandidatePair.currentRoundTripTime === "number") {
+        networkRttMs = activeCandidatePair.currentRoundTripTime * 1000;
+      } else if (typeof activeCandidatePair.roundTripTime === "number") {
+        networkRttMs = activeCandidatePair.roundTripTime * 1000;
+      }
+    }
+    if (networkRttMs === null && remoteInboundVideo && typeof remoteInboundVideo.roundTripTime === "number") {
+      networkRttMs = remoteInboundVideo.roundTripTime * 1000;
+    }
 
     statistics.actualResolution.textContent = String(videoElement.videoWidth || 0)
       + " × " + String(videoElement.videoHeight || 0);
@@ -2861,6 +2980,7 @@ async function updateStatistics() {
 
     if (inboundVideo) {
       const framesDecoded = statisticValue(inboundVideo, "framesDecoded");
+      const bytesReceived = statisticValue(inboundVideo, "bytesReceived");
       const sampleTime = typeof inboundVideo.timestamp === "number"
         ? inboundVideo.timestamp
         : performance.now();
@@ -2869,7 +2989,7 @@ async function updateStatistics() {
       statistics.video.framesDropped.textContent = statisticValue(inboundVideo, "framesDropped");
       statistics.video.packetsReceived.textContent = statisticValue(inboundVideo, "packetsReceived");
       statistics.video.packetsLost.textContent = statisticValue(inboundVideo, "packetsLost");
-      statistics.video.bytesReceived.textContent = statisticValue(inboundVideo, "bytesReceived");
+      statistics.video.bytesReceived.textContent = bytesReceived;
       const codecReport = inboundVideo.codecId ? codecReports[inboundVideo.codecId] : null;
       const receivedCodec = codecReport && codecReport.mimeType
         ? String(codecReport.mimeType)
@@ -2888,17 +3008,44 @@ async function updateStatistics() {
         runtimeSources, ["bitDepth", "bitsPerComponent"]));
       displayRuntimeValue(statistics.receivedHdr, availableRuntimeValue(
         runtimeSources, ["hdr", "hdrMetadataType", "highDynamicRange"]));
+      let currentFps = "0";
       if (previousDecodedSample && sampleTime > previousDecodedSample.time) {
         const elapsedSeconds = (sampleTime - previousDecodedSample.time) / 1000;
-        statistics.video.decodedFps.textContent = (
+        currentFps = (
           (framesDecoded - previousDecodedSample.frames) / elapsedSeconds
         ).toFixed(1);
+        statistics.video.decodedFps.textContent = currentFps;
       }
       previousDecodedSample = { time: sampleTime, frames: framesDecoded };
+
+      let currentMbps = "—";
+      if (previousBytesSample && sampleTime > previousBytesSample.time) {
+        const elapsedSeconds = (sampleTime - previousBytesSample.time) / 1000;
+        const byteDiff = bytesReceived - previousBytesSample.bytes;
+        currentMbps = ((byteDiff * 8) / (elapsedSeconds * 1000000)).toFixed(1);
+      }
+      previousBytesSample = { time: sampleTime, bytes: bytesReceived };
+
+      if (streamStats.fps) {
+        streamStats.fps.textContent = currentFps !== "0" ? currentFps + " FPS" : "—";
+        if (typeof inboundVideo.totalDecodeTime === "number" && framesDecoded > 0) {
+          const avgDecodeMs = (inboundVideo.totalDecodeTime / framesDecoded) * 1000;
+          streamStats.decodeTime.textContent = avgDecodeMs.toFixed(1) + " ms";
+        } else {
+          streamStats.decodeTime.textContent = "—";
+        }
+        if (streamStats.rtt) {
+          streamStats.rtt.textContent = networkRttMs !== null ? networkRttMs.toFixed(1) + " ms" : "—";
+        }
+        streamStats.dropped.textContent = String(statisticValue(inboundVideo, "framesDropped"));
+        streamStats.bitrate.textContent = currentMbps !== "—" ? currentMbps + " Mbps" : "—";
+        streamStats.packetLoss.textContent = String(statisticValue(inboundVideo, "packetsLost"));
+      }
 
       if (sampleTime - lastStatisticsConsoleTime >= 5000) {
         lastStatisticsConsoleTime = sampleTime;
         console.log("Stream diagnostics: " + JSON.stringify({
+          networkRttMs: networkRttMs !== null ? Number(networkRttMs.toFixed(1)) : null,
           requestedWidth: selectedSession ? selectedSession.width : 0,
           requestedHeight: selectedSession ? selectedSession.height : 0,
           requestedCodec: selectedSession ? selectedSession.codec : "unknown",
@@ -2917,7 +3064,7 @@ async function updateStatistics() {
           framesDropped: statisticValue(inboundVideo, "framesDropped"),
           packetsReceived: statisticValue(inboundVideo, "packetsReceived"),
           packetsLost: statisticValue(inboundVideo, "packetsLost"),
-          bytesReceived: statisticValue(inboundVideo, "bytesReceived"),
+          bytesReceived: bytesReceived,
           audioPacketsReceived: inboundAudio
             ? statisticValue(inboundAudio, "packetsReceived") : 0,
           audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
@@ -2931,9 +3078,11 @@ async function updateStatistics() {
       statistics.audio.packetsReceived.textContent = statisticValue(inboundAudio, "packetsReceived");
       statistics.audio.packetsLost.textContent = statisticValue(inboundAudio, "packetsLost");
       statistics.audio.bytesReceived.textContent = statisticValue(inboundAudio, "bytesReceived");
-      statistics.audio.jitter.textContent = Number(
-        statisticValue(inboundAudio, "jitter")
-      ).toFixed(6);
+      const jitterVal = statisticValue(inboundAudio, "jitter");
+      statistics.audio.jitter.textContent = Number(jitterVal).toFixed(6);
+      if (streamStats.jitter) {
+        streamStats.jitter.textContent = (Number(jitterVal) * 1000).toFixed(1) + " ms";
+      }
     }
   } catch (error) {
     if (!statisticsErrorReported) {

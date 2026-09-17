@@ -70,6 +70,7 @@ const mouseOverlay = element();
 const logs = [];
 const mouseModeChanges = [];
 const shortcutStops = [];
+const shortcutStats = [];
 
 const manager = new global.GamepadInputManager({
   controlChannel: function () { return control; },
@@ -81,6 +82,7 @@ const manager = new global.GamepadInputManager({
   overlay: overlay,
   mouseOverlay: mouseOverlay,
   onStopShortcut: function (record) { shortcutStops.push(record.controllerId); },
+  onStatsShortcut: function (record) { shortcutStats.push(record.controllerId); },
   onMouseModeChanged: function (record, active) {
     mouseModeChanges.push({ controllerId: record.controllerId, active: active });
   },
@@ -214,6 +216,7 @@ assert.deepStrictEqual(mouseModeChanges, [
 ], "mouse mode disable did not emit one state-transition notification");
 
 const shortcutRecord = manager.recordsById.get(1);
+const X = 1 << 2;
 const LB = 1 << 4;
 const RB = 1 << 5;
 const BACK = 1 << 6;
@@ -231,6 +234,17 @@ assert.deepStrictEqual(shortcutStops, [1], "held shortcut stopped repeatedly");
 manager.observeStopShortcut(shortcutRecord, { buttons: LB | RB | BACK });
 manager.observeStopShortcut(shortcutRecord, { buttons: LB | RB | BACK | START });
 assert.deepStrictEqual(shortcutStops, [1, 1], "shortcut latch did not reset after release");
+
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | BACK });
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | X });
+assert.strictEqual(shortcutStats.length, 0, "partial stats shortcut toggled overlay");
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | BACK | X });
+assert.deepStrictEqual(shortcutStats, [1], "full stats shortcut did not toggle once");
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | BACK | X });
+assert.deepStrictEqual(shortcutStats, [1], "held stats shortcut toggled repeatedly");
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | BACK });
+manager.observeStatsShortcut(shortcutRecord, { buttons: LB | RB | BACK | X });
+assert.deepStrictEqual(shortcutStats, [1, 1], "stats shortcut latch did not reset after release");
 
 const inactiveStops = [];
 gamepads = [createGamepad(0, "Inactive shortcut test controller", null)];

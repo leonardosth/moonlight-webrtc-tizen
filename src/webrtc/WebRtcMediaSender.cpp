@@ -45,6 +45,9 @@ std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(
     case VideoCodec::HEVC:
         return std::make_shared<rtc::H265RtpPacketizer>(
             rtc::NalUnit::Separator::StartSequence, rtpConfiguration);
+    case VideoCodec::AV1:
+        return std::make_shared<rtc::AV1RtpPacketizer>(
+            rtc::AV1RtpPacketizer::Packetization::Obu, rtpConfiguration);
     }
     throw std::invalid_argument("Unsupported WebRTC video codec");
 }

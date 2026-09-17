@@ -238,6 +238,7 @@
       droppedStates: 0,
       mouseMode: false,
       stopShortcutHeld: false,
+      statsShortcutHeld: false,
       rumble: {
         strongMagnitude: 0,
         weakMagnitude: 0,
@@ -495,6 +496,22 @@
     }
   };
 
+  GamepadInputManager.prototype.observeStatsShortcut = function (record, state) {
+    const required = BUTTONS.LB | BUTTONS.RB | BUTTONS.BACK | BUTTONS.X;
+    const pressed = (state.buttons & required) === required;
+    if (!pressed) {
+      record.statsShortcutHeld = false;
+      return;
+    }
+    if (record.statsShortcutHeld) {
+      return;
+    }
+    record.statsShortcutHeld = true;
+    if (typeof this.options.onStatsShortcut === "function") {
+      this.options.onStatsShortcut(record);
+    }
+  };
+
   GamepadInputManager.prototype.unregister = function (browserIndex, notifyGateway) {
     const record = this.recordsByIndex.get(browserIndex);
     if (!record) {
@@ -539,6 +556,7 @@
         manager.announce(record);
         const state = completeState(gamepad, record.pollState);
         manager.observeStopShortcut(record, state);
+        manager.observeStatsShortcut(record, state);
         if (!record.hasSentState || !statesEqual(record.lastSentState, state)
             || now - record.lastSendTime >= KEEPALIVE_INTERVAL_MS) {
           if (manager.sendState(record, state, now)) {
