@@ -70,7 +70,7 @@ std::optional<std::string> validateStreamSettings(const StreamSettings& settings
 {
     const auto* mode = findVideoMode(settings.width, settings.height, settings.fps);
     if (!mode) {
-        if (settings.fps != 60 && settings.fps != 120) {
+        if (settings.fps != 30 && settings.fps != 60 && settings.fps != 120) {
             return "Unsupported frame rate";
         }
         return "Unsupported resolution";

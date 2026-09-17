@@ -217,14 +217,18 @@ Json makeCapabilities()
         }
     }
     message.update({
-        {"frameRates", {60, 120}},
+        {"frameRates", {30, 60, 120}},
         {"codecs", {"h264", "hevc", "av1"}},
         {"hdr", true},
         {"audio", "stereo"},
         {"audioSampleRate", 48000},
         {"bitratesKbps", SupportedBitratesKbps},
         {"defaults",
-         {{"720p60", 12000},
+         {{"720p30", 10000},
+          {"1080p30", 15000},
+          {"1440p30", 20000},
+          {"2160p30", 30000},
+          {"720p60", 12000},
           {"1080p60", 20000},
           {"1440p60", 30000},
           {"2160p60", 50000},

@@ -45,6 +45,11 @@ inline constexpr std::array SupportedVideoModes{
     VideoMode{1920, 1080, 60, true,  true,  true,  VideoCodec::H264, 20000, false, true},
     VideoMode{2560, 1440, 60, true,  true,  true,  VideoCodec::HEVC, 30000, true,  true},
     VideoMode{3840, 2160, 60, false, true,  true,  VideoCodec::HEVC, 50000, false, true},
+    // 30 fps modes
+    VideoMode{1280,  720, 30, true,  true,  true,  VideoCodec::H264, 10000, false, false},
+    VideoMode{1920, 1080, 30, true,  true,  true,  VideoCodec::H264, 15000, false, true},
+    VideoMode{2560, 1440, 30, true,  true,  true,  VideoCodec::HEVC, 20000, true,  true},
+    VideoMode{3840, 2160, 30, false, true,  true,  VideoCodec::HEVC, 30000, false, true},
     // 120 fps modes (experimental)
     VideoMode{1280,  720, 120, true,  true,  true,  VideoCodec::H264, 20000, true, false},
     VideoMode{1920, 1080, 120, true,  true,  true,  VideoCodec::HEVC, 40000, true, true},

@@ -81,6 +81,22 @@ int main()
             3840, 2160, gateway::VideoCodec::HEVC);
         settings4k_120.fps = 120;
         settings4k_120.bitrateKbps = 70000;
+        auto settings720_30 = gateway::defaultStreamSettings(
+            1280, 720, gateway::VideoCodec::H264);
+        settings720_30.fps = 30;
+        settings720_30.bitrateKbps = 10000;
+        auto settings1080_30 = gateway::defaultStreamSettings(
+            1920, 1080, gateway::VideoCodec::H264);
+        settings1080_30.fps = 30;
+        settings1080_30.bitrateKbps = 15000;
+        auto settings1440_30 = gateway::defaultStreamSettings(
+            2560, 1440, gateway::VideoCodec::HEVC);
+        settings1440_30.fps = 30;
+        settings1440_30.bitrateKbps = 20000;
+        auto settings4k_30 = gateway::defaultStreamSettings(
+            3840, 2160, gateway::VideoCodec::HEVC);
+        settings4k_30.fps = 30;
+        settings4k_30.bitrateKbps = 30000;
         auto settingsHdr1080 = settingsHevc1080;
         settingsHdr1080.hdr = true;
         auto settingsHdrAv1_1080 = settingsAv1_1080;
@@ -93,6 +109,10 @@ int main()
         settingsHdr1440_120.hdr = true;
         auto settingsHdr4k_120 = settings4k_120;
         settingsHdr4k_120.hdr = true;
+        auto settingsHdr1440_30 = settings1440_30;
+        settingsHdr1440_30.hdr = true;
+        auto settingsHdr4k_30 = settings4k_30;
+        settingsHdr4k_30.hdr = true;
         require(!gateway::validateStreamSettings(settings720)
                     && settings720.bitrateKbps == 12000,
                 "Valid 720p60 settings were rejected");
@@ -117,6 +137,22 @@ int main()
                     && settings4k_120.fps == 120
                     && settings4k_120.bitrateKbps == 70000,
                 "Valid 4K120 settings were rejected");
+        require(!gateway::validateStreamSettings(settings720_30)
+                    && settings720_30.fps == 30
+                    && settings720_30.bitrateKbps == 10000,
+                "Valid 720p30 settings were rejected");
+        require(!gateway::validateStreamSettings(settings1080_30)
+                    && settings1080_30.fps == 30
+                    && settings1080_30.bitrateKbps == 15000,
+                "Valid 1080p30 settings were rejected");
+        require(!gateway::validateStreamSettings(settings1440_30)
+                    && settings1440_30.fps == 30
+                    && settings1440_30.bitrateKbps == 20000,
+                "Valid 1440p30 settings were rejected");
+        require(!gateway::validateStreamSettings(settings4k_30)
+                    && settings4k_30.fps == 30
+                    && settings4k_30.bitrateKbps == 30000,
+                "Valid 4K30 settings were rejected");
         require(!gateway::validateStreamSettings(settings1440)
                     && settings1440.codec == gateway::VideoCodec::HEVC
                     && settings1440.bitrateKbps == 30000,
@@ -130,7 +166,9 @@ int main()
                     && !gateway::validateStreamSettings(settingsHdr1440)
                     && !gateway::validateStreamSettings(settingsHdr4k)
                     && !gateway::validateStreamSettings(settingsHdr1440_120)
-                    && !gateway::validateStreamSettings(settingsHdr4k_120),
+                    && !gateway::validateStreamSettings(settingsHdr4k_120)
+                    && !gateway::validateStreamSettings(settingsHdr1440_30)
+                    && !gateway::validateStreamSettings(settingsHdr4k_30),
                 "Valid 1080p/1440p/4K HEVC/AV1 HDR settings were rejected");
 
         auto invalid = settings720;
@@ -138,7 +176,7 @@ int main()
         require(gateway::validateStreamSettings(invalid).has_value(),
                 "Invalid resolution was accepted");
         invalid = settings720;
-        invalid.fps = 30;
+        invalid.fps = 45;
         require(gateway::validateStreamSettings(invalid).has_value(),
                 "Invalid frame rate was accepted");
         invalid = settings720;
@@ -240,7 +278,7 @@ int main()
         requireProtocolError(
             [] {
                 gateway::protocol::parseClientMessage(
-                    startMessage(1280, 720, 30, "h264", 12000, false, 2));
+                    startMessage(1280, 720, 45, "h264", 12000, false, 2));
             },
             "unsupported-settings");
         requireProtocolError(
@@ -456,8 +494,8 @@ int main()
 
         const auto capabilities = gateway::protocol::makeCapabilities();
         require(capabilities.at("resolutions").size() == 4
-                    && capabilities.at("videoModes").size() == 8
-                    && capabilities.at("frameRates") == nlohmann::json::array({60, 120})
+                    && capabilities.at("videoModes").size() == 12
+                    && capabilities.at("frameRates") == nlohmann::json::array({30, 60, 120})
                     && capabilities.at("codecs")
                         == nlohmann::json::array({"h264", "hevc", "av1"})
                     && capabilities.at("hdr").get<bool>()

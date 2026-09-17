@@ -73,6 +73,8 @@ const gatewayRemoveCancelButton = document.getElementById("gateway-remove-cancel
 const gatewayRemoveConfirmButton = document.getElementById("gateway-remove-confirm");
 const playButton = document.getElementById("play-button");
 const continueButton = document.getElementById("continue-button");
+const streamFpsButton = document.getElementById("stream-fps-button");
+const streamBitrateButton = document.getElementById("stream-bitrate-button");
 const statsOverlayButton = document.getElementById("stats-overlay-button");
 const diagnosticsButton = document.getElementById("diagnostics-button");
 const stopButton = document.getElementById("stop-button");
@@ -843,6 +845,7 @@ function updateFpsOptions(resolutionKey, preferredFps) {
   if (availableFps.length === 0) {
     availableFps.push(60);
   }
+  availableFps.sort(function (a, b) { return a - b; });
   const fpsItems = availableFps.map(function (fps) {
     return {
       value: String(fps),
@@ -1053,6 +1056,7 @@ function handleSessionStatus(message) {
   }
   if (message.video) {
     selectedSession = {
+      appId: (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null),
       appTitle: selectedSession ? selectedSession.appTitle : "Desktop",
       width: message.video.width,
       height: message.video.height,
@@ -1146,7 +1150,10 @@ function handleHostSessionStatus(message) {
 function selectedSettings() {
   const dimensions = resolutionSelect.value.split("x");
   return {
-    appTitle: appSelect.options[appSelect.selectedIndex].textContent,
+    appId: appSelect ? appSelect.value : null,
+    appTitle: (appSelect && appSelect.selectedIndex >= 0 && appSelect.options[appSelect.selectedIndex])
+      ? appSelect.options[appSelect.selectedIndex].textContent
+      : "Application",
     width: Number(dimensions[0]),
     height: Number(dimensions[1]),
     fps: Number(fpsSelect.value) || 60,
@@ -1504,7 +1511,92 @@ function showHome(view) {
   }
 }
 
+function updateStreamMenuControls() {
+  const currentFps = selectedSession ? selectedSession.fps : (Number(fpsSelect.value) || 60);
+  if (streamFpsButton) {
+    streamFpsButton.textContent = "FPS: " + String(currentFps) + " FPS";
+  }
+  const currentBitrate = selectedSession ? selectedSession.bitrateKbps : Number(bitrateSelect.value);
+  if (streamBitrateButton) {
+    streamBitrateButton.textContent = "Bitrate: " + String(Math.round(currentBitrate / 1000)) + " Mbps";
+  }
+}
+
+function cycleStreamFps() {
+  const availableFps = [30, 60, 120];
+  const currentFps = selectedSession ? selectedSession.fps : (Number(fpsSelect.value) || 60);
+  let nextIndex = (availableFps.indexOf(currentFps) + 1) % availableFps.length;
+  if (nextIndex < 0) {
+    nextIndex = 0;
+  }
+  const nextFps = availableFps[nextIndex];
+
+  fpsSelect.value = String(nextFps);
+  applySelectedVideoMode();
+  persistCurrentPreferences();
+
+  if (selectedSession) {
+    selectedSession.fps = nextFps;
+    updateStreamOverlay();
+  }
+  updateStreamMenuControls();
+
+  if (sessionState === "streaming") {
+    const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
+    if (targetAppId) {
+      try {
+        setHomeMessage("Switching stream to " + String(nextFps) + " FPS...", false);
+        showNotification("Stream Settings", "Switching to " + String(nextFps) + " FPS...", false);
+        sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
+        hideStreamMenu();
+      } catch (error) {
+        reportError("Failed to switch stream FPS", error);
+      }
+    }
+  }
+}
+
+function cycleStreamBitrate() {
+  if (!bitrateSelect.options || bitrateSelect.options.length === 0) {
+    return;
+  }
+  let currentIndex = -1;
+  const currentBitrate = selectedSession ? selectedSession.bitrateKbps : Number(bitrateSelect.value);
+  for (let i = 0; i < bitrateSelect.options.length; i++) {
+    if (Number(bitrateSelect.options[i].value) === currentBitrate) {
+      currentIndex = i;
+      break;
+    }
+  }
+  const nextIndex = (currentIndex + 1) % bitrateSelect.options.length;
+  bitrateSelect.selectedIndex = nextIndex;
+  const nextBitrate = Number(bitrateSelect.value);
+  persistCurrentPreferences();
+
+  if (selectedSession) {
+    selectedSession.bitrateKbps = nextBitrate;
+    updateStreamOverlay();
+  }
+  updateStreamMenuControls();
+
+  if (sessionState === "streaming") {
+    const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
+    if (targetAppId) {
+      try {
+        const mbps = Math.round(nextBitrate / 1000);
+        setHomeMessage("Switching bitrate to " + String(mbps) + " Mbps...", false);
+        showNotification("Stream Settings", "Switching to " + String(mbps) + " Mbps...", false);
+        sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
+        hideStreamMenu();
+      } catch (error) {
+        reportError("Failed to switch stream bitrate", error);
+      }
+    }
+  }
+}
+
 function showStreamMenu() {
+  updateStreamMenuControls();
   streamMenu.hidden = false;
   streamOverlay.classList.remove("faded");
   gamepadInputManager.pauseForUi();
@@ -2431,6 +2523,12 @@ document.addEventListener("keydown", function (event) {
 
 playButton.addEventListener("click", startSelectedSession);
 continueButton.addEventListener("click", hideStreamMenu);
+if (streamFpsButton) {
+  streamFpsButton.addEventListener("click", cycleStreamFps);
+}
+if (streamBitrateButton) {
+  streamBitrateButton.addEventListener("click", cycleStreamBitrate);
+}
 statsOverlayButton.addEventListener("click", toggleStatsOverlay);
 diagnosticsButton.addEventListener("click", toggleDiagnostics);
 stopButton.addEventListener("click", stopCurrentSession);

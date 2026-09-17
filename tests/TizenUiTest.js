@@ -60,6 +60,8 @@ assert.ok(html.includes('aria-disabled="true"'),
   "coming-soon rows must be disabled rather than focusable");
 assert.ok(html.includes('id="stream-menu"') && html.includes('id="diagnostics-button"'),
   "the streaming Back menu and statistics control must remain available");
+assert.ok(html.includes('id="stream-fps-button"') && html.includes('id="stream-bitrate-button"'),
+  "the in-stream quick settings controls for FPS and bitrate must be present in the stream menu");
 assert.ok(html.includes('id="toast-region"'), "notification region is missing");
 assert.ok(html.includes('src="application-artwork.js"'),
   "the Applications screen must load the Gateway artwork transport");

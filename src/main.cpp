@@ -1722,6 +1722,7 @@ private:
                     throw std::runtime_error("Selected Sunshine application no longer exists");
                 }
                 if (runningId && *runningId == switchTarget->appId) {
+                    stopActiveSession(session, false);
                     sendHostSessionStatus(session,
                                           "resuming",
                                           runningId,
@@ -1734,6 +1735,7 @@ private:
 
             if (!runningId) {
                 if (switchTarget) {
+                    stopActiveSession(session, false);
                     sendHostSessionStatus(session, "starting", std::nullopt, switchTarget->appId);
                     finishHostOperation(session);
                     startSession(session, *switchTarget);
