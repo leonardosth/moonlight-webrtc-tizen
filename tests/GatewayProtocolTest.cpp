@@ -257,6 +257,19 @@ int main()
                     == settingsHdr4k,
                 "HEVC HDR 4K start-session parsing failed");
 
+        const auto parsedAv1_1080 = gateway::protocol::parseClientMessage(
+            startMessage(1920, 1080, 60, "av1", 20000, false, 2));
+        require(std::get<gateway::protocol::StartSessionRequest>(
+                    parsedAv1_1080.payload).settings
+                    == settingsAv1_1080,
+                "AV1 1080p start-session parsing failed");
+        const auto parsedHdrAv1_1080 = gateway::protocol::parseClientMessage(
+            startMessage(1920, 1080, 60, "AV1", 20000, true, 2));
+        require(std::get<gateway::protocol::StartSessionRequest>(
+                    parsedHdrAv1_1080.payload).settings
+                    == settingsHdrAv1_1080,
+                "AV1 HDR 1080p start-session parsing failed");
+
         requireProtocolError(
             [] {
                 gateway::protocol::parseClientMessage(
@@ -479,6 +492,44 @@ int main()
                         hdrMainSdp, settingsHdr1080)
                     && gateway::hevcLevelId(hdrMain10LowerLevelSdp) == 93,
                 "HEVC Main10 SDP answer validation is incorrect");
+        const auto settingsAv1_4k = gateway::defaultStreamSettings(
+            3840, 2160, gateway::VideoCodec::AV1);
+        auto settingsAv1_720_30 = gateway::defaultStreamSettings(
+            1280, 720, gateway::VideoCodec::AV1);
+        settingsAv1_720_30.fps = 30;
+        require(gateway::av1FormatParameters(settingsAv1_1080)
+                    == "profile=0;level-idx=9;tier=0"
+                && gateway::av1FormatParameters(settingsHdrAv1_1080)
+                    == "profile=0;level-idx=9;tier=0"
+                && gateway::av1FormatParameters(settingsAv1_4k)
+                    == "profile=0;level-idx=13;tier=0"
+                && gateway::av1FormatParameters(settingsAv1_720_30)
+                    == "profile=0;level-idx=5;tier=0"
+                && gateway::av1FormatParameters(settingsHevc1080) == std::nullopt,
+                "AV1 SDP format parameters are incorrect");
+        const std::string validAv1Sdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "a=fmtp:96 profile=0;level-idx=9;tier=0\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        const std::string validAv1WithoutFmtpSdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        const std::string invalidAv1ProfileSdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "a=fmtp:96 profile=2;level-idx=9;tier=0\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        require(gateway::hasExpectedAv1FormatParameters(
+                    validAv1Sdp, settingsAv1_1080)
+                && gateway::hasExpectedAv1FormatParameters(
+                    validAv1WithoutFmtpSdp, settingsAv1_1080)
+                && !gateway::hasExpectedAv1FormatParameters(
+                    invalidAv1ProfileSdp, settingsAv1_1080)
+                && !gateway::hasExpectedAv1FormatParameters(
+                    h264Sdp, settingsAv1_1080),
+                "AV1 SDP answer validation is incorrect");
         const std::string colorSpaceSdp =
             "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
             "a=extmap:9/sendonly http://www.webrtc.org/experiments/rtp-hdrext/color-space\r\n"

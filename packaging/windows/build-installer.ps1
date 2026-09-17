@@ -93,8 +93,13 @@ $outputDirectory = Resolve-FullPath $OutputDirectory
 $stageDirectory = Join-Path $outputDirectory 'stage'
 $issPath = Join-Path $PSScriptRoot 'MoonlightWebRTC.iss'
 
+$binaryDirectory = $buildDirectory
+if (Test-Path -LiteralPath (Join-Path $buildDirectory 'Release\moonlight_webrtc.exe') -PathType Leaf) {
+    $binaryDirectory = Join-Path $buildDirectory 'Release'
+}
+
 foreach ($requiredFile in @('moonlight_webrtc.exe', 'moonlight_webrtc_tray.exe')) {
-    $path = Join-Path $buildDirectory $requiredFile
+    $path = Join-Path $binaryDirectory $requiredFile
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required Release binary is missing: $path"
     }
@@ -109,7 +114,7 @@ if (Test-Path -LiteralPath $stageDirectory) {
 }
 New-Item -ItemType Directory -Path $stageDirectory -Force | Out-Null
 
-$searchDirectories = @($buildDirectory, (Join-Path $buildDirectory 'vcpkg_installed\x64-windows\bin')) |
+$searchDirectories = @($binaryDirectory, $buildDirectory, (Join-Path $buildDirectory 'vcpkg_installed\x64-windows\bin'), (Join-Path $binaryDirectory 'vcpkg_installed\x64-windows\bin')) |
     Where-Object { Test-Path -LiteralPath $_ -PathType Container }
 $dependencyFiles = @{}
 foreach ($directory in $searchDirectories) {
@@ -120,7 +125,7 @@ foreach ($directory in $searchDirectories) {
 
 $queue = [System.Collections.Generic.Queue[string]]::new()
 foreach ($name in @('moonlight_webrtc.exe', 'moonlight_webrtc_tray.exe')) {
-    $source = Join-Path $buildDirectory $name
+    $source = Join-Path $binaryDirectory $name
     Copy-Item -LiteralPath $source -Destination (Join-Path $stageDirectory $name)
     $queue.Enqueue($source)
 }

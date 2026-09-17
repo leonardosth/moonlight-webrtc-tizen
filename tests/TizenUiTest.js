@@ -278,4 +278,11 @@ assert.ok(appSource.includes("if (activeGateway && gatewayWakeIsActive(activeGat
 assert.ok(appSource.includes("if (active === gatewayWakeButton) {"),
   "remote OK and gamepad A must activate Wake PC through the shared menu action");
 
+assert.ok(appSource.includes("function detectWebRtcAv1Support()"),
+  "runtime AV1 capability detection is required");
+assert.ok(appSource.includes('message.state === "codec-unsupported"'),
+  "Gateway codec-unsupported status must be handled for auto-fallback");
+assert.ok(appSource.includes("selectedSession.codec = fallbackCodec;"),
+  "codec-unsupported must retry with the fallback codec");
+
 console.log("Tizen UI tests passed");

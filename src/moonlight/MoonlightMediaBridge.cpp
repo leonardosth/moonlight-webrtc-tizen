@@ -4,6 +4,7 @@
 #include "moonlight/MoonlightVideoProfile.h"
 
 #include <cstring>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -208,6 +209,10 @@ int MoonlightMediaBridge::setupVideo(int videoFormat,
         ? "HEVC RExt 8-bit 4:4:4"
         : videoFormat == VIDEO_FORMAT_H265_REXT10_444
         ? "HEVC RExt 10-bit 4:4:4"
+        : videoFormat == VIDEO_FORMAT_AV1_MAIN8
+        ? "AV1 Main 8-bit"
+        : videoFormat == VIDEO_FORMAT_AV1_MAIN10
+        ? "AV1 Main 10-bit"
         : "unexpected";
     std::ostringstream message;
     message << "Moonlight video setup: " << width << 'x' << height << " @ " << redrawRate
@@ -225,6 +230,12 @@ int MoonlightMediaBridge::setupVideo(int videoFormat,
         log("Moonlight video dimensions do not match the requested stream settings");
         videoConfigured_.store(false, std::memory_order_release);
         return -1;
+    }
+
+    if (settings_.codec == VideoCodec::AV1) {
+        bitDepthLuma_.store(settings_.hdr ? 10 : 8, std::memory_order_release);
+        bitDepthChroma_.store(settings_.hdr ? 10 : 8, std::memory_order_release);
+        chromaFormatIdc_.store(1, std::memory_order_release);
     }
 
     videoConfigured_.store(true, std::memory_order_release);
@@ -246,12 +257,21 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
 
     if (!firstVideoFrameLogged_.exchange(true, std::memory_order_acq_rel)) {
         std::ostringstream message;
-        message << "First Moonlight DECODE_UNIT: hdrActive="
-                << (decodeUnit->hdrActive ? "true" : "false")
+        message << "First Moonlight DECODE_UNIT: codec=" << videoCodecName(settings_.codec)
+                << ", hdrActive=" << (decodeUnit->hdrActive ? "true" : "false")
                 << ", colorSpace=" << static_cast<int>(decodeUnit->colorspace)
                 << (decodeUnit->colorspace == COLORSPACE_REC_2020 ? " (Rec.2020)" : "")
                 << ", frameType=" << decodeUnit->frameType
-                << ", RTP=" << decodeUnit->rtpTimestamp;
+                << ", RTP=" << decodeUnit->rtpTimestamp
+                << ", size=" << flattened->size();
+        if (!flattened->empty()) {
+            message << ", first bytes=";
+            const auto count = std::min<std::size_t>(flattened->size(), 12);
+            for (std::size_t i = 0; i < count; ++i) {
+                message << std::hex << std::setw(2) << std::setfill('0')
+                        << static_cast<int>((*flattened)[i]) << ' ';
+            }
+        }
         log(message.str());
     }
 
@@ -264,24 +284,35 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         }
 
         if (!main10Verified_.load(std::memory_order_acquire)) {
-            if (const auto sps = parseHevcSps(*flattened)) {
-                bitDepthLuma_.store(sps->bitDepthLuma, std::memory_order_release);
-                bitDepthChroma_.store(sps->bitDepthChroma, std::memory_order_release);
-                chromaFormatIdc_.store(sps->chromaFormatIdc, std::memory_order_release);
-                std::ostringstream message;
-                message << "HEVC SPS: profile_idc=" << sps->profileIdc
-                        << ", Main10-compatible="
-                        << (sps->main10CompatibleProfile ? "yes" : "no")
-                        << ", chroma_format_idc=" << sps->chromaFormatIdc
-                        << ", bit_depth_luma=" << sps->bitDepthLuma
-                        << ", bit_depth_chroma=" << sps->bitDepthChroma;
-                log(message.str());
-                if (!sps->isMain10_420()) {
-                    failHdrValidation(
-                        "HDR HEVC SPS is not Main10 10-bit 4:2:0 compatible");
-                } else {
+            if (settings_.codec == VideoCodec::AV1) {
+                if (observedHdrActive_.load(std::memory_order_acquire)
+                    && observedRec2020_.load(std::memory_order_acquire)) {
+                    bitDepthLuma_.store(10, std::memory_order_release);
+                    bitDepthChroma_.store(10, std::memory_order_release);
+                    chromaFormatIdc_.store(1, std::memory_order_release);
                     main10Verified_.store(true, std::memory_order_release);
-                    log("HEVC bit depth: 10");
+                    log("AV1 HDR: Profile 0 Main 10-bit 4:2:0 Rec.2020 verified");
+                }
+            } else if (settings_.codec == VideoCodec::HEVC) {
+                if (const auto sps = parseHevcSps(*flattened)) {
+                    bitDepthLuma_.store(sps->bitDepthLuma, std::memory_order_release);
+                    bitDepthChroma_.store(sps->bitDepthChroma, std::memory_order_release);
+                    chromaFormatIdc_.store(sps->chromaFormatIdc, std::memory_order_release);
+                    std::ostringstream message;
+                    message << "HEVC SPS: profile_idc=" << sps->profileIdc
+                            << ", Main10-compatible="
+                            << (sps->main10CompatibleProfile ? "yes" : "no")
+                            << ", chroma_format_idc=" << sps->chromaFormatIdc
+                            << ", bit_depth_luma=" << sps->bitDepthLuma
+                            << ", bit_depth_chroma=" << sps->bitDepthChroma;
+                    log(message.str());
+                    if (!sps->isMain10_420()) {
+                        failHdrValidation(
+                            "HDR HEVC SPS is not Main10 10-bit 4:2:0 compatible");
+                    } else {
+                        main10Verified_.store(true, std::memory_order_release);
+                        log("HEVC bit depth: 10");
+                    }
                 }
             }
         }
@@ -290,7 +321,9 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             && observedRec2020_.load(std::memory_order_acquire)
             && main10Verified_.load(std::memory_order_acquire)
             && !hdrValidationComplete_.exchange(true, std::memory_order_acq_rel)) {
-            log("Moonlight HDR validation passed: Main10 4:2:0, hdrActive=true, Rec.2020");
+            log(std::string("Moonlight HDR validation passed: ")
+                + (settings_.codec == VideoCodec::AV1 ? "AV1 Main 10-bit" : "HEVC Main10")
+                + " 4:2:0, hdrActive=true, Rec.2020");
         }
 
         std::chrono::steady_clock::time_point deadline;
@@ -305,7 +338,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             reason << "HDR validation timed out (hdrActive="
                    << (observedHdrActive_.load() ? "true" : "false")
                    << ", Rec.2020=" << (observedRec2020_.load() ? "true" : "false")
-                   << ", Main10 SPS=" << (main10Verified_.load() ? "true" : "false")
+                   << ", 10-bit=" << (main10Verified_.load() ? "true" : "false")
                    << ')';
             failHdrValidation(reason.str());
         }

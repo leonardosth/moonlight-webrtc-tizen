@@ -160,18 +160,23 @@ to Sunshine or receives a Sunshine URL.
 }
 ```
 
-`codec` is exactly `"h264"` or `"hevc"`. HEVC with `hdr: false` selects Main Profile
-8-bit SDR with Rec.709. HEVC with `hdr: true` selects Main10 HDR with Rec.2020 and is
+`codec` is `"h264"`, `"hevc"`, or `"av1"`. HEVC or AV1 with `hdr: false` selects Main Profile
+8-bit SDR with Rec.709. HEVC or AV1 with `hdr: true` selects Main10 HDR with Rec.2020 and is
 accepted only at 1920x1080, 2560x1440, or 3840x2160. H.264 HDR and 720p HDR are rejected.
-There is no silent codec or SDR fallback. AV1 is not part of protocol version 1. The
-Gateway validates every field and rejects unsupported settings. Status transitions use
-`session-status` with one of `idle`, `starting`, `connecting-sunshine`,
-`starting-moonlight`, `starting-webrtc`, `streaming`, `stopping`, or `error`.
+There is no silent codec or SDR fallback. The Gateway validates every field and rejects
+unsupported settings. Status transitions use `session-status` with one of `idle`, `starting`,
+`connecting-sunshine`, `starting-moonlight`, `starting-webrtc`, `streaming`, `stopping`,
+`codec-unsupported`, or `error`.
 
-For HDR, the H.265 SDP format parameters explicitly request Main10 (`profile-id=2`),
+For HDR HEVC, the H.265 SDP format parameters explicitly request Main10 (`profile-id=2`),
 Main tier, and level 4.1 at 1080p60, level 5.0 at 1440p60, or level 5.1 at 4K60. The
 Gateway rejects the session if the Tizen answer does not preserve that profile instead
 of sending Main10 under a Main 8-bit negotiation.
+
+For AV1, SDP format parameters (RFC 9584) request Main Profile (`profile=0`), Main tier,
+and the level index matching resolution and frame rate (e.g. `level-idx=9` for 1080p60,
+`level-idx=13` for 4K60). If the Tizen browser answer omits or rejects AV1, the Gateway
+reports a `codec-unsupported` status so the client can automatically fall back to HEVC.
 
 The Gateway offers the standard WebRTC RTP color-space extension and records whether
 Tizen negotiates it. It intentionally does not transmit the extension on this Samsung

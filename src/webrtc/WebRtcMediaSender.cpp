@@ -26,6 +26,36 @@ void WebRtcMediaSender::sendVideoAccessUnit(VideoCodec codec,
     if (codec != videoCodec_) {
         throw std::invalid_argument("Video access unit codec does not match the WebRTC track");
     }
+    if (accessUnit.empty()) {
+        return;
+    }
+    if (codec == VideoCodec::AV1) {
+        // AV1 Temporal Unit must start with a temporal_delimiter_obu (0x12, 0x00)
+        // for rtc::AV1RtpPacketizer (RFC 9584) to extract and packetize the OBUs.
+        constexpr std::uint8_t obuTemporalDelimiter[] = { 0x12, 0x00 };
+        if (accessUnit.size() >= 2
+            && accessUnit[0] == obuTemporalDelimiter[0]
+            && accessUnit[1] == obuTemporalDelimiter[1]) {
+            videoTrack_->sendFrame(reinterpret_cast<const rtc::byte*>(accessUnit.data()),
+                                   accessUnit.size(),
+                                   rtc::FrameInfo(rtpTimestamp));
+        } else {
+            // Prepend the Temporal Delimiter OBU to form a standard Temporal Unit.
+            std::vector<rtc::byte> temporalUnit;
+            temporalUnit.reserve(sizeof(obuTemporalDelimiter) + accessUnit.size());
+            temporalUnit.insert(temporalUnit.end(),
+                                reinterpret_cast<const rtc::byte*>(obuTemporalDelimiter),
+                                reinterpret_cast<const rtc::byte*>(obuTemporalDelimiter + sizeof(obuTemporalDelimiter)));
+            temporalUnit.insert(temporalUnit.end(),
+                                reinterpret_cast<const rtc::byte*>(accessUnit.data()),
+                                reinterpret_cast<const rtc::byte*>(accessUnit.data() + accessUnit.size()));
+            videoTrack_->sendFrame(temporalUnit.data(),
+                                   temporalUnit.size(),
+                                   rtc::FrameInfo(rtpTimestamp));
+        }
+        return;
+    }
+
     videoTrack_->sendFrame(reinterpret_cast<const rtc::byte*>(accessUnit.data()),
                            accessUnit.size(),
                            rtc::FrameInfo(rtpTimestamp));
@@ -47,7 +77,7 @@ std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(
             rtc::NalUnit::Separator::StartSequence, rtpConfiguration);
     case VideoCodec::AV1:
         return std::make_shared<rtc::AV1RtpPacketizer>(
-            rtc::AV1RtpPacketizer::Packetization::Obu, rtpConfiguration);
+            rtc::AV1RtpPacketizer::Packetization::TemporalUnit, rtpConfiguration);
     }
     throw std::invalid_argument("Unsupported WebRTC video codec");
 }

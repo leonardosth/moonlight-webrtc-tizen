@@ -168,6 +168,58 @@ bool hasExpectedHevcFormatParameters(std::string_view sdp,
         && formatParameter(section, payloadType, "tier-flag") == "0";
 }
 
+std::optional<std::string> av1FormatParameters(const StreamSettings& settings)
+{
+    if (settings.codec != VideoCodec::AV1) {
+        return std::nullopt;
+    }
+    if (const auto error = validateStreamSettings(settings)) {
+        throw std::invalid_argument(*error);
+    }
+    // AV1 RTP payload format parameters (RFC 9584):
+    //   profile: 0 = Main (supports 8-bit and 10-bit 4:2:0), 1 = High (4:4:4), 2 = Professional (12-bit / 4:2:2)
+    //   Both SDR (8-bit) and HDR (10-bit Main10) in Moonlight use Main profile (0).
+    const int profile = 0;
+    // AV1 level indices: 5 = 2.1 (720p30), 8 = 4.0 (1080p30), 9 = 4.1 (1080p60/720p120),
+    // 12 = 5.1 (4K30/1440p60), 13 = 5.2 (4K60/1440p120), 14 = 5.3 (4K120)
+    int levelIdx = 9;
+    if (settings.width <= 1280) {
+        levelIdx = settings.fps <= 30 ? 5 : (settings.fps <= 60 ? 9 : 9);
+    } else if (settings.width <= 1920) {
+        levelIdx = settings.fps <= 30 ? 8 : (settings.fps <= 60 ? 9 : 12);
+    } else if (settings.width <= 2560) {
+        levelIdx = settings.fps <= 60 ? 12 : 13;
+    } else {
+        levelIdx = settings.fps <= 30 ? 12 : (settings.fps <= 60 ? 13 : 14);
+    }
+    return "profile=" + std::to_string(profile)
+        + ";level-idx=" + std::to_string(levelIdx) + ";tier=0";
+}
+
+bool hasExpectedAv1FormatParameters(std::string_view sdp,
+                                    const StreamSettings& settings,
+                                    int payloadType)
+{
+    if (!av1FormatParameters(settings)) {
+        return true;
+    }
+    const auto section = videoSection(sdp);
+    if (section.empty()) {
+        // No video section means the codec was likely stripped from the answer entirely.
+        return false;
+    }
+    if (!hasExpectedVideoCodec(sdp, VideoCodec::AV1, payloadType)) {
+        return false;
+    }
+    // AV1 answer validation: we accept the answer if the browser negotiated AV1/90000.
+    // If the answer explicitly specified a profile parameter, verify it is Profile 0 (Main).
+    const auto profile = formatParameter(section, payloadType, "profile");
+    if (profile && *profile != "0") {
+        return false;
+    }
+    return true;
+}
+
 std::optional<int> hevcLevelId(std::string_view sdp, int payloadType)
 {
     const auto value = formatParameter(videoSection(sdp), payloadType, "level-id");

@@ -200,6 +200,10 @@ let openSettingSelect = null;
 let videoModes = [];
 let codecSelectionWasIntentional = false;
 let updatingCodecOptions = false;
+let av1StreamStartTime = 0;
+let av1DecodeVerified = false;
+let av1LastDecodedCount = 0;
+let av1LastDecodedTime = 0;
 let lastStatisticsConsoleTime = 0;
 let lastStatisticsSampleTime = 0;
 // Half the console-log period, so that log still lands on its own five-second schedule.
@@ -808,9 +812,47 @@ function selectedVideoMode() {
   }) || null;
 }
 
+let webRtcAv1Supported = null;
+
+function detectWebRtcAv1Support() {
+  if (webRtcAv1Supported !== null) {
+    return webRtcAv1Supported;
+  }
+  if (typeof durableStorage !== "undefined" && durableStorage && durableStorage.getItem("moonlight-webrtc.av1-unsupported") === "true") {
+    log("WebRTC AV1 disabled: hardware decoding failed previously on this TV (black screen decode failure)");
+    webRtcAv1Supported = false;
+    return false;
+  }
+  try {
+    if (typeof RTCRtpReceiver !== "undefined" && typeof RTCRtpReceiver.getCapabilities === "function") {
+      const caps = RTCRtpReceiver.getCapabilities("video");
+      if (caps && Array.isArray(caps.codecs)) {
+        webRtcAv1Supported = caps.codecs.some(function (codec) {
+          return Boolean(codec.mimeType && codec.mimeType.toLowerCase() === "video/av1");
+        });
+        const codecList = caps.codecs.map(function (c) { return c.mimeType; }).join(", ");
+        log("WebRTC video receiver codecs: " + codecList);
+        log("WebRTC AV1 capability: " + (webRtcAv1Supported ? "Available" : "Unavailable"));
+        return webRtcAv1Supported;
+      }
+    }
+  } catch (error) {
+    log("Failed to inspect WebRTC capabilities: " + errorMessage(error));
+  }
+  webRtcAv1Supported = false;
+  log("WebRTC AV1 capability: Unavailable (no RTCRtpReceiver capabilities)");
+  return webRtcAv1Supported;
+}
+
+if (typeof window !== "undefined") {
+  window.detectWebRtcAv1Support = detectWebRtcAv1Support;
+}
+
 function codecDisplayName(codec) {
   if (codec === "av1") {
-    return "AV1 — Experimental (No TV HW)";
+    return detectWebRtcAv1Support()
+      ? "AV1 — Experimental"
+      : "AV1 — Unsupported by TV";
   }
   return codec === "hevc" ? "HEVC (H.265)" : "H.264";
 }
@@ -875,17 +917,24 @@ function applySelectedVideoMode(preferencesToRestore) {
   if (!mode || !Array.isArray(mode.codecs) || mode.codecs.length === 0) {
     return;
   }
+  const av1Supported = detectWebRtcAv1Support();
+  const availableCodecs = av1Supported
+    ? mode.codecs
+    : mode.codecs.filter(function (codec) { return codec !== "av1"; });
   const previousCodec = preferencesToRestore && preferencesToRestore.codec
     ? preferencesToRestore.codec
     : codecSelect.value;
   const keepIntentionalCodec = codecSelectionWasIntentional
-    && mode.codecs.indexOf(previousCodec) >= 0;
+    && availableCodecs.indexOf(previousCodec) >= 0;
   updatingCodecOptions = true;
-  replaceSelectOptions(codecSelect, mode.codecs, {
+  replaceSelectOptions(codecSelect, availableCodecs, {
     value: function (codec) { return codec; },
     label: codecDisplayName,
   });
-  codecSelect.value = keepIntentionalCodec ? previousCodec : mode.defaultCodec;
+  const fallbackCodec = availableCodecs.indexOf(mode.defaultCodec) >= 0
+    ? mode.defaultCodec
+    : (availableCodecs[0] || "h264");
+  codecSelect.value = keepIntentionalCodec ? previousCodec : fallbackCodec;
   updatingCodecOptions = false;
   updateHdrOptions(mode, preferencesToRestore ? preferencesToRestore.hdr : undefined);
   selectSavedOrDefault(
@@ -1084,6 +1133,12 @@ function handleSessionStatus(message) {
     showStreaming();
     resumeGamepadInput();
     setHomeMessage("Streaming", false);
+    if (selectedSession && selectedSession.codec === "av1") {
+      av1StreamStartTime = performance.now();
+      av1DecodeVerified = false;
+      av1LastDecodedCount = 0;
+      av1LastDecodedTime = 0;
+    }
   } else if (message.state === "idle") {
     launchCancellationRequested = false;
     launchCancellationSent = false;
@@ -1093,6 +1148,52 @@ function handleSessionStatus(message) {
     setHomeMessage("Stream disconnected. Running applications remain available.", false);
     showNotification("Streaming disconnected", "Choose an application to resume or launch.", false);
     requestApplications();
+  } else if (message.state === "codec-unsupported" || message.state === "codec-fallback") {
+    // AV1 was not accepted by the TV browser — auto-fallback to HEVC.
+    webRtcAv1Supported = false;
+    hostOperationBusy = false;
+    launchCancellationRequested = false;
+    launchCancellationSent = false;
+    closePeerConnection();
+    currentSessionId = 0;
+    var unsupportedCodec = selectedSession ? selectedSession.codec : "av1";
+    var fallbackCodec = "hevc";
+    log("Codec " + unsupportedCodec + " unsupported by TV browser, falling back to " + fallbackCodec);
+    showNotification(
+      "AV1 not supported",
+      "Your TV does not support AV1 via WebRTC. Retrying with HEVC...",
+      true
+    );
+    if (selectedVideoMode()) {
+      applySelectedVideoMode();
+    }
+    // Mark AV1 as unavailable for this session and retry with HEVC.
+    if (selectedSession) {
+      selectedSession.codec = fallbackCodec;
+      try {
+        sendGatewayMessage({
+          type: "start-session",
+          appId: selectedSession.appId || (appSelect ? appSelect.value : "0"),
+          video: {
+            width: selectedSession.width,
+            height: selectedSession.height,
+            fps: selectedSession.fps,
+            codec: fallbackCodec,
+            bitrateKbps: selectedSession.bitrateKbps,
+            hdr: selectedSession.hdr,
+          },
+          audio: { channels: 2 },
+        });
+        setHomeMessage("Retrying with " + codecDisplayName(fallbackCodec) + "...", false);
+      } catch (retryError) {
+        sessionState = "idle";
+        reportError("Unable to retry session with fallback codec", retryError);
+        showHome("applications");
+      }
+    } else {
+      showHome("applications");
+      setHomeMessage(message.message || "AV1 codec is not supported by this TV", true);
+    }
   } else if (message.state === "error") {
     hostOperationBusy = false;
     launchCancellationRequested = false;
@@ -1358,6 +1459,10 @@ async function handleOffer(message) {
 }
 
 function closePeerConnection() {
+  av1StreamStartTime = 0;
+  av1DecodeVerified = false;
+  av1LastDecodedCount = 0;
+  av1LastDecodedTime = 0;
   sessionTeardownInProgress = true;
   suspendGamepadInput(false);
   gamepadInputSessionInitialized = false;
@@ -3076,6 +3181,50 @@ async function updateStatistics() {
         + " Mbps";
     }
 
+    if (selectedSession && selectedSession.codec === "av1" && sessionState === "streaming") {
+      const framesDecodedNum = inboundVideo ? (Number(statisticValue(inboundVideo, "framesDecoded")) || 0) : 0;
+      const packetsReceivedNum = inboundVideo ? (Number(statisticValue(inboundVideo, "packetsReceived")) || 0) : 0;
+      const videoHasSize = Boolean(videoElement && videoElement.videoWidth > 0 && videoElement.videoHeight > 0);
+      const now = performance.now();
+
+      if (framesDecodedNum > 0 || videoHasSize) {
+        if (!av1DecodeVerified) {
+          av1DecodeVerified = true;
+          av1LastDecodedCount = framesDecodedNum;
+          av1LastDecodedTime = now;
+        } else {
+          if (framesDecodedNum > av1LastDecodedCount) {
+            av1LastDecodedCount = framesDecodedNum;
+            av1LastDecodedTime = now;
+          } else if (av1LastDecodedTime > 0 && (now - av1LastDecodedTime >= 4000)) {
+            log("AV1 stream stall detected: framesDecoded stuck at " + framesDecodedNum + " for " + ((now - av1LastDecodedTime) / 1000).toFixed(1) + "s — auto-falling back to HEVC");
+            av1LastDecodedTime = 0;
+            handleSessionStatus({
+              state: "codec-unsupported",
+              message: "AV1 video froze / stalled after decoding started"
+            });
+            return;
+          }
+        }
+      } else if (!av1DecodeVerified && av1StreamStartTime > 0) {
+        const elapsedMs = now - av1StreamStartTime;
+        if ((elapsedMs >= 3500 && packetsReceivedNum > 0) || elapsedMs >= 5000) {
+          log("AV1 decode failure detected: 0 frames decoded after " + (elapsedMs / 1000).toFixed(1) + "s (packets received: " + packetsReceivedNum + ")");
+          log("TV browser cannot decode AV1 via WebRTC (black screen) — auto-falling back to HEVC");
+          av1StreamStartTime = 0;
+          if (typeof durableStorage !== "undefined" && durableStorage) {
+            durableStorage.setItem("moonlight-webrtc.av1-unsupported", "true");
+          }
+          webRtcAv1Supported = false;
+          handleSessionStatus({
+            state: "codec-unsupported",
+            message: "TV cannot decode AV1 video (black screen / 0 frames decoded)"
+          });
+          return;
+        }
+      }
+    }
+
     if (inboundVideo) {
       const framesDecoded = statisticValue(inboundVideo, "framesDecoded");
       const bytesReceived = statisticValue(inboundVideo, "bytesReceived");
@@ -3250,6 +3399,7 @@ syncGamepadUi();
 showHome();
 gamepadUiNavigation.start();
 log("Persistent storage: " + durableStorage.describe());
+detectWebRtcAv1Support();
 // Restored before the cached capabilities are applied: applying them persists the whole
 // preference set, and a select still holding its markup default would write that default
 // back over the saved value.

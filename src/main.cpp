@@ -646,7 +646,7 @@ private:
 
         rtc::Description::Video video("video", rtc::Description::Direction::SendOnly);
         if (settings.codec == gateway::VideoCodec::AV1) {
-            video.addAV1Codec(VideoPayloadType);
+            video.addAV1Codec(VideoPayloadType, gateway::av1FormatParameters(settings));
         } else if (settings.codec == gateway::VideoCodec::HEVC) {
             video.addH265Codec(
                 VideoPayloadType, gateway::hevcFormatParameters(settings));
@@ -860,6 +860,9 @@ private:
             session->moonlightSession.reset();
         }
         log("Moonlight streaming stopped");
+        if (session->peerConnected) {
+            sendSessionStatus(session, "idle");
+        }
     }
 
     void streamTestMedia(Session& session)
@@ -1847,6 +1850,16 @@ private:
         }
 
         log("Incoming SDP answer:\n" + sdp);
+        if (session->settings.codec == gateway::VideoCodec::AV1
+            && !gateway::hasExpectedAv1FormatParameters(
+                sdp, session->settings, VideoPayloadType)) {
+            log("Tizen rejected AV1 codec in SDP answer — TV does not support AV1 via WebRTC");
+            sendSessionStatus(session,
+                              "codec-unsupported",
+                              "Tizen did not negotiate AV1");
+            session->requestStreamingStop();
+            return;
+        }
         if (!gateway::hasExpectedHevcFormatParameters(
                 sdp, session->settings, VideoPayloadType)) {
             log("Tizen rejected the requested HEVC Main10 SDP profile");

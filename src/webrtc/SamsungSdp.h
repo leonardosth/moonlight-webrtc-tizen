@@ -22,6 +22,10 @@ std::optional<std::string> hevcFormatParameters(const StreamSettings& settings);
 bool hasExpectedHevcFormatParameters(std::string_view sdp,
                                      const StreamSettings& settings,
                                      int payloadType = 96);
+std::optional<std::string> av1FormatParameters(const StreamSettings& settings);
+bool hasExpectedAv1FormatParameters(std::string_view sdp,
+                                    const StreamSettings& settings,
+                                    int payloadType = 96);
 std::optional<int> hevcLevelId(std::string_view sdp, int payloadType = 96);
 std::optional<int> videoExtensionId(std::string_view sdp, std::string_view uri);
 
