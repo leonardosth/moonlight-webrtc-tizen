@@ -5,19 +5,35 @@
   const statusElement = document.getElementById("status-message");
   const spinnerElement = document.getElementById("spinner");
 
+  function showError(msg) {
+    if (spinnerElement) {
+      spinnerElement.style.display = "none";
+    }
+    if (statusElement) {
+      statusElement.className = "status-message error-message";
+      statusElement.textContent = msg;
+    }
+  }
+
+  function setStatus(msg) {
+    if (statusElement) {
+      statusElement.textContent = msg;
+    }
+  }
+
   function launchMoonlight() {
     if (!window.tizen || !tizen.application) {
-      if (statusElement) {
-        statusElement.textContent = "Ambiente Tizen não detectado (executando no navegador).";
-      }
+      showError("Ambiente Tizen não detectado (executando no navegador).");
       return;
     }
+
+    setStatus("Iniciando Moonlight WebRTC...");
 
     try {
       const appControlData = new tizen.ApplicationControlData("autostart", ["Steam"]);
       const appControl = new tizen.ApplicationControl(
         "http://tizen.org/appcontrol/operation/view",
-        null,
+        "steam",
         null,
         null,
         [appControlData]
@@ -27,32 +43,55 @@
         appControl,
         TARGET_APP_ID,
         function () {
-          // Moonlight launched successfully; exit this launcher app
+          setStatus("Conectando ao Moonlight...");
           setTimeout(function () {
             try {
               tizen.application.getCurrentApplication().exit();
             } catch (_e) {}
-          }, 300);
+          }, 800);
         },
         function (error) {
-          console.error("Falha ao abrir Moonlight WebRTC:", error);
-          if (spinnerElement) {
-            spinnerElement.style.display = "none";
-          }
-          if (statusElement) {
-            statusElement.className = "status-message error-message";
-            statusElement.textContent = "Moonlight WebRTC Client não encontrado. Por favor, instale o aplicativo Moonlight WebRTC na TV.";
+          console.warn("launchAppControl falhou, tentando launch direto:", error);
+          try {
+            tizen.application.launch(
+              TARGET_APP_ID,
+              function () {
+                setStatus("Conectando ao Moonlight...");
+                setTimeout(function () {
+                  try {
+                    tizen.application.getCurrentApplication().exit();
+                  } catch (_e) {}
+                }, 800);
+              },
+              function (launchErr) {
+                const errDetail = (launchErr && (launchErr.message || launchErr.name)) || (error && (error.message || error.name)) || "App não encontrado";
+                showError("Erro ao abrir Moonlight (" + errDetail + "). Verifique se o Moonlight WebRTC Client está instalado na TV.");
+              }
+            );
+          } catch (e) {
+            showError("Erro ao abrir Moonlight: " + (e.message || String(e)));
           }
         }
       );
     } catch (err) {
       console.error("Erro ao preparar AppControl:", err);
-      if (spinnerElement) {
-        spinnerElement.style.display = "none";
-      }
-      if (statusElement) {
-        statusElement.className = "status-message error-message";
-        statusElement.textContent = "Erro ao iniciar atalho: " + (err.message || String(err));
+      try {
+        tizen.application.launch(
+          TARGET_APP_ID,
+          function () {
+            setStatus("Conectando ao Moonlight...");
+            setTimeout(function () {
+              try {
+                tizen.application.getCurrentApplication().exit();
+              } catch (_e) {}
+            }, 800);
+          },
+          function (launchErr) {
+            showError("Erro ao abrir Moonlight: " + (launchErr.message || err.message));
+          }
+        );
+      } catch (e) {
+        showError("Erro ao preparar atalho: " + (err.message || String(err)));
       }
     }
   }

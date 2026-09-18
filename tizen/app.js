@@ -687,6 +687,9 @@ function handleGatewayStatus(message) {
     }
   }
   updatePlayAvailability();
+  if (autostartTargetApp && !autostartLaunched) {
+    attemptAutostartLaunch();
+  }
 }
 
 function replaceSelectOptions(select, values, formatter) {
@@ -1286,7 +1289,7 @@ function selectedSettings() {
 }
 
 function startSelectedSession() {
-  if (playButton.disabled) {
+  if (playButton.disabled && !isAutostartSession) {
     return;
   }
   selectedSession = selectedSettings();
@@ -3641,9 +3644,14 @@ renderGateways();
 probeSavedGateways();
 
 function attemptAutostartLaunch() {
-  if (!autostartTargetApp || autostartLaunched || !applications || applications.length === 0) {
+  if (!autostartTargetApp || autostartLaunched) {
     return false;
   }
+  if (!gatewayConnected || !sunshineReady || !appsLoaded || !applications || applications.length === 0) {
+    log("Autostart: waiting for Sunshine readiness (connected=" + gatewayConnected + ", sunshine=" + sunshineReady + ", apps=" + appsLoaded + ")");
+    return false;
+  }
+
   const query = autostartTargetApp.toLowerCase().trim();
   let match = applications.find(function (app) {
     return String(app.title).toLowerCase().trim() === query;
@@ -3664,7 +3672,20 @@ function attemptAutostartLaunch() {
     log("Autostart: launching application '" + match.title + "' (ID " + match.id + ")");
     setHomeMessage("Starting " + match.title + "...", false);
     showNotification("Steam", "Starting " + match.title + "...", false);
-    launchApplication(match.id);
+
+    if (runningAppId && String(runningAppId) !== String(match.id)) {
+      log("Autostart: another application is running (" + runningAppId + "), switching directly to " + match.title);
+      sendGatewayMessage(applicationSessionRequest("switch-session", match.id));
+      return true;
+    }
+
+    const optionIndex = Array.prototype.findIndex.call(appSelect.options, function (option) {
+      return option.value === String(match.id);
+    });
+    if (optionIndex >= 0) {
+      appSelect.selectedIndex = optionIndex;
+    }
+    startSelectedSession();
     return true;
   } else {
     log("Autostart: application '" + autostartTargetApp + "' not found in Sunshine application list");
@@ -3693,16 +3714,16 @@ function triggerAutostart(targetAppName) {
   setHomeMessage(autostartTargetApp + " — Connecting to " + gateway.name + "...", false);
   showNotification(autostartTargetApp, "Launching shortcut for " + gateway.name + "...", false);
 
-  if (gatewayConnected && appsLoaded && applications.length > 0) {
+  if (gatewayConnected && sunshineReady && appsLoaded && applications.length > 0) {
     attemptAutostartLaunch();
     return;
   }
 
   const state = gatewayRuntimeStates.get(gateway.id);
-  if (gateway.macAddress && (state === "Offline" || !gatewayConnected) && wakeOnLan.isSupported()) {
+  const isOffline = state === "Offline" || (!gatewayConnected && state !== "Online");
+  if (gateway.macAddress && isOffline && wakeOnLan.isSupported()) {
     wakeGateway(gateway.id);
-  }
-  if (!gatewayConnected) {
+  } else if (!gatewayConnected) {
     connectGateway(gateway);
   }
 }
@@ -3723,6 +3744,9 @@ function checkRequestedAppControl() {
       const reqAppControl = tizen.application.getCurrentApplication().getRequestedAppControl();
       if (reqAppControl && reqAppControl.appControl) {
         const appControl = reqAppControl.appControl;
+        if (appControl.uri && appControl.uri.toLowerCase() === "steam") {
+          targetApp = "Steam";
+        }
         if (Array.isArray(appControl.data)) {
           for (let i = 0; i < appControl.data.length; i++) {
             const item = appControl.data[i];
