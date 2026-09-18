@@ -80,6 +80,7 @@ const streamBitrateButton = document.getElementById("stream-bitrate-button");
 const statsOverlayButton = document.getElementById("stats-overlay-button");
 const diagnosticsButton = document.getElementById("diagnostics-button");
 const stopButton = document.getElementById("stop-button");
+const stopHostButton = document.getElementById("stop-host-button");
 const homeMessage = document.getElementById("home-message");
 const gatewayStateElement = document.getElementById("gateway-state");
 const sunshineStateElement = document.getElementById("sunshine-state");
@@ -234,6 +235,8 @@ let autostartLaunched = false;
 let autostartEverStreamed = false;
 let autostartFailed = false;
 let autostartConnectTimer = null;
+let enterHoldTimer = null;
+let enterHoldTriggered = false;
 let pendingGatewayValidation = null;
 let gatewayValidationTimer = null;
 let gatewayEditorState = null;
@@ -1355,6 +1358,20 @@ function stopCurrentSession() {
   }
 }
 
+function stopCurrentHostSession() {
+  hideStreamMenu();
+  try {
+    sessionTeardownInProgress = true;
+    sendGatewayMessage({ type: "stop-host-session" });
+    sessionState = "stopping";
+    overlay.connection.textContent = "Stopping";
+    sessionStateElement.textContent = "Stopping";
+    showNotification("Ending session", "Stopping application on host PC...", false);
+  } catch (error) {
+    reportError("Unable to stop host session", error);
+  }
+}
+
 function createPeerConnection(sessionId) {
   closePeerConnection();
   sessionTeardownInProgress = false;
@@ -2381,11 +2398,12 @@ function closeRunningAppMenu() {
 }
 
 function openRunningAppMenu() {
+  const targetAppId = arguments[0];
   if (hostOperationBusy || !ui || ui.currentView !== "applications") {
     return false;
   }
   const active = document.activeElement;
-  const applicationId = active && active.dataset ? active.dataset.applicationId : null;
+  const applicationId = targetAppId || (active && active.dataset ? active.dataset.applicationId : null) || runningAppId;
   if (!applicationId || String(applicationId) !== String(runningAppId || "")) {
     return false;
   }
@@ -2488,7 +2506,7 @@ function launchApplication(applicationId) {
   }
   if (runningAppId) {
     if (String(runningAppId) === String(applicationId)) {
-      startSelectedSession();
+      openRunningAppMenu(applicationId);
     } else {
       openSwitchAppDialog(applicationId);
     }
@@ -2834,6 +2852,24 @@ document.addEventListener("keydown", function (event) {
   const isDown = key === "ArrowDown" || keyCode === 40;
   const isLeft = key === "ArrowLeft" || keyCode === 37;
   const isRight = key === "ArrowRight" || keyCode === 39;
+  const isMenuKey = key === "MediaPlayPause" || key === "MediaPlay" || key === "MediaPause"
+    || key === "ColorF0Red" || key === "ColorF1Green" || key === "ColorF2Yellow" || key === "ColorF3Blue"
+    || keyCode === 10252 || keyCode === 415 || keyCode === 19 || keyCode === 403 || keyCode === 10140;
+
+  if (isMenuKey && streamingScreen.hidden && launchingScreen.hidden) {
+    event.preventDefault();
+    openFocusedApplicationMenu();
+    return;
+  }
+
+  if (isEnter && streamingScreen.hidden && launchingScreen.hidden && !gatewayEditorIsOpen() && !settingsSelectorIsOpen()) {
+    if (enterHoldTimer === null && !enterHoldTriggered) {
+      enterHoldTimer = setTimeout(function () {
+        enterHoldTriggered = true;
+        openFocusedApplicationMenu();
+      }, 500);
+    }
+  }
 
   if (!streamingScreen.hidden) {
     if (isBack) {
@@ -2874,8 +2910,27 @@ document.addEventListener("keydown", function (event) {
       navigateUi(isRight ? "right" : "left");
     }
   } else if (isEnter) {
+    if (enterHoldTriggered) {
+      event.preventDefault();
+      return;
+    }
     if (activateFocusedControl()) {
       event.preventDefault();
+    }
+  }
+});
+
+document.addEventListener("keyup", function (event) {
+  const isEnter = event.key === "Enter" || event.keyCode === 13;
+  if (isEnter) {
+    if (enterHoldTimer !== null) {
+      clearTimeout(enterHoldTimer);
+      enterHoldTimer = null;
+    }
+    if (enterHoldTriggered) {
+      enterHoldTriggered = false;
+      event.preventDefault();
+      event.stopPropagation();
     }
   }
 });
@@ -2894,6 +2949,9 @@ if (streamBitrateButton) {
 statsOverlayButton.addEventListener("click", toggleStatsOverlay);
 diagnosticsButton.addEventListener("click", toggleDiagnostics);
 stopButton.addEventListener("click", stopCurrentSession);
+if (stopHostButton) {
+  stopHostButton.addEventListener("click", stopCurrentHostSession);
+}
 resumeSessionButton.addEventListener("click", resumeRunningApplication);
 stopHostSessionButton.addEventListener("click", stopRunningApplication);
 switchCancelButton.addEventListener("click", closeSwitchAppDialog);
@@ -3654,6 +3712,13 @@ updateTrackCounts();
 gamepadInputManager.updateDiagnostics();
 syncGamepadUi();
 gamepadUiNavigation.start();
+try {
+  if (window.tizen && tizen.tvinputdevice) {
+    ["MediaPlayPause", "MediaPlay", "MediaPause", "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue"].forEach(function (k) {
+      try { tizen.tvinputdevice.registerKey(k); } catch (_e) {}
+    });
+  }
+} catch (_e) {}
 log("Persistent storage: " + durableStorage.describe());
 detectWebRtcAv1Support();
 // Restored before the cached capabilities are applied: applying them persists the whole

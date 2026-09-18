@@ -285,4 +285,12 @@ assert.ok(appSource.includes('message.state === "codec-unsupported"'),
 assert.ok(appSource.includes("selectedSession.codec = fallbackCodec;"),
   "codec-unsupported must retry with the fallback codec");
 
+assert.ok(html.includes('id="stop-host-button"') && html.includes("End session on PC"),
+  "stream menu must provide an explicit option to end the session on the host PC");
+assert.ok(appSource.includes("function stopCurrentHostSession()")
+  && appSource.includes('type: "stop-host-session"'),
+  "ending session from stream menu must send stop-host-session to the Gateway");
+assert.ok(appSource.includes("isMenuKey") && appSource.includes("openFocusedApplicationMenu"),
+  "TV remote MediaPlayPause and color keys must open the focused application/gateway context menu");
+
 console.log("Tizen UI tests passed");
