@@ -235,6 +235,22 @@ let autostartLaunched = false;
 let autostartEverStreamed = false;
 let autostartFailed = false;
 let autostartConnectTimer = null;
+let isSwitchingStreamSettings = false;
+let switchingSettingsTimer = null;
+
+function setSwitchingStreamSettings(switching) {
+  isSwitchingStreamSettings = Boolean(switching);
+  if (switchingSettingsTimer !== null) {
+    clearTimeout(switchingSettingsTimer);
+    switchingSettingsTimer = null;
+  }
+  if (isSwitchingStreamSettings) {
+    switchingSettingsTimer = setTimeout(function () {
+      isSwitchingStreamSettings = false;
+      switchingSettingsTimer = null;
+    }, 15000);
+  }
+}
 let enterHoldTimer = null;
 let enterHoldTriggered = false;
 let pendingGatewayValidation = null;
@@ -1059,6 +1075,7 @@ function setRunningApplication(appId) {
 }
 
 function handleGatewayError(message) {
+  setSwitchingStreamSettings(false);
   const detail = message.message || "Gateway request failed";
   reportError(message.requestType || "Gateway", new Error(detail));
   if (sessionState !== "streaming") {
@@ -1157,6 +1174,7 @@ function handleSessionStatus(message) {
 
   overlay.connection.textContent = readableState(message.state);
   if (message.state === "streaming") {
+    setSwitchingStreamSettings(false);
     if (launchCancellationRequested) {
       requestLaunchCancellation();
       updateLaunchingScreen();
@@ -1183,6 +1201,10 @@ function handleSessionStatus(message) {
     launchCancellationSent = false;
     closePeerConnection();
     currentSessionId = 0;
+    if (isSwitchingStreamSettings) {
+      log("Session status: idle received during stream settings switch, waiting for new stream session");
+      return;
+    }
     if (isAutostartSession && autostartEverStreamed) {
       exitApplication();
       return;
@@ -1238,6 +1260,7 @@ function handleSessionStatus(message) {
       setHomeMessage(message.message || "AV1 codec is not supported by this TV", true);
     }
   } else if (message.state === "error") {
+    setSwitchingStreamSettings(false);
     hostOperationBusy = false;
     launchCancellationRequested = false;
     launchCancellationSent = false;
@@ -1342,6 +1365,7 @@ function startSelectedSession() {
 }
 
 function stopCurrentSession() {
+  setSwitchingStreamSettings(false);
   hideStreamMenu();
   if (!currentSessionId) {
     showHome();
@@ -1359,6 +1383,7 @@ function stopCurrentSession() {
 }
 
 function stopCurrentHostSession() {
+  setSwitchingStreamSettings(false);
   hideStreamMenu();
   try {
     sessionTeardownInProgress = true;
@@ -1806,11 +1831,13 @@ function openStreamResolutionSelector() {
         const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
         if (targetAppId) {
           try {
+            setSwitchingStreamSettings(true);
             setHomeMessage("Switching resolution to " + item.label + "...", false);
             showNotification("Stream Settings", "Switching resolution to " + item.label + "...", false);
             sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
             hideStreamMenu();
           } catch (error) {
+            setSwitchingStreamSettings(false);
             reportError("Failed to switch stream resolution", error);
           }
         }
@@ -1863,11 +1890,13 @@ function openStreamFpsSelector() {
         const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
         if (targetAppId) {
           try {
+            setSwitchingStreamSettings(true);
             setHomeMessage("Switching stream to " + String(nextFps) + " FPS...", false);
             showNotification("Stream Settings", "Switching to " + String(nextFps) + " FPS...", false);
             sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
             hideStreamMenu();
           } catch (error) {
+            setSwitchingStreamSettings(false);
             reportError("Failed to switch stream FPS", error);
           }
         }
@@ -1915,11 +1944,13 @@ function openStreamBitrateSelector() {
         if (targetAppId) {
           try {
             const mbps = Math.round(nextBitrate / 1000);
+            setSwitchingStreamSettings(true);
             setHomeMessage("Switching bitrate to " + String(mbps) + " Mbps...", false);
             showNotification("Stream Settings", "Switching to " + String(mbps) + " Mbps...", false);
             sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
             hideStreamMenu();
           } catch (error) {
+            setSwitchingStreamSettings(false);
             reportError("Failed to switch stream bitrate", error);
           }
         }
@@ -2481,11 +2512,13 @@ function confirmSwitchApplication() {
     return;
   }
   try {
+    setSwitchingStreamSettings(true);
     hostOperationBusy = true;
     updatePlayAvailability();
     setHomeMessage("Stopping running application before launch...", false);
     sendGatewayMessage(applicationSessionRequest("switch-session", targetId));
   } catch (error) {
+    setSwitchingStreamSettings(false);
     hostOperationBusy = false;
     reportError("Unable to switch Sunshine application", error);
     updatePlayAvailability();
@@ -3799,6 +3832,7 @@ function attemptAutostartLaunch() {
 
     if (runningAppId && String(runningAppId) !== String(match.id)) {
       log("Autostart: another application is running (" + runningAppId + "), switching directly to " + match.title);
+      setSwitchingStreamSettings(true);
       sendGatewayMessage(applicationSessionRequest("switch-session", match.id));
       return true;
     }
