@@ -90,11 +90,13 @@
       script.src = sender.scriptUrl;
       script.async = true;
       script.onerror = function () {
+        sender.modulePromise = null;
         reject(new Error("The Wake-on-LAN module could not be loaded"));
       };
       script.onload = function () {
         const factory = global[MODULE_FACTORY];
         if (typeof factory !== "function") {
+          sender.modulePromise = null;
           reject(new Error("The Wake-on-LAN module is invalid"));
           return;
         }

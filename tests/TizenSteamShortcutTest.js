@@ -34,5 +34,8 @@ assert.ok(moonlightApp.includes("function checkRequestedAppControl()"), "Moonlig
 assert.ok(moonlightApp.includes("function triggerAutostart(targetAppName)"), "Moonlight app must implement triggerAutostart");
 assert.ok(moonlightApp.includes("function attemptAutostartLaunch()"), "Moonlight app must implement attemptAutostartLaunch");
 assert.ok(moonlightApp.includes("isAutostartSession"), "Moonlight app must track autostart sessions for auto-exit");
+assert.ok(moonlightApp.includes("autostartEverStreamed"), "Moonlight app must track if stream has actually started before auto-exiting on idle");
+assert.ok(moonlightApp.includes("showAutostartLaunching"), "Moonlight app must display the launching screen directly instead of flashing homeScreen");
+assert.ok(moonlightApp.includes('includes("big picture")'), "Moonlight app autostart must support matching Steam Big Picture");
 
 console.log("Tizen Steam shortcut tests passed");

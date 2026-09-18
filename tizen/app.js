@@ -231,6 +231,9 @@ let activeGateway = null;
 let autostartTargetApp = null;
 let isAutostartSession = false;
 let autostartLaunched = false;
+let autostartEverStreamed = false;
+let autostartFailed = false;
+let autostartConnectTimer = null;
 let pendingGatewayValidation = null;
 let gatewayValidationTimer = null;
 let gatewayEditorState = null;
@@ -515,12 +518,21 @@ function connectGateway(gateway) {
 
   socket.addEventListener("open", function () {
     clearTimeout(wakeAttemptTimer);
+    if (autostartConnectTimer !== null) {
+      clearTimeout(autostartConnectTimer);
+      autostartConnectTimer = null;
+    }
     if (token !== gatewayConnectionToken) {
       return;
     }
     gatewayConnected = true;
     gatewayStateElement.textContent = "Connected";
-    setHomeMessage("Connected. Loading Sunshine applications...", false);
+    if (isAutostartSession) {
+      launchingStatusElement.textContent = "Connected. Loading Sunshine applications…";
+      launchingProgressElement.dataset.stage = "2";
+    } else {
+      setHomeMessage("Connected. Loading Sunshine applications...", false);
+    }
     updatePlayAvailability();
     requestApplications();
     log("Gateway WebSocket connected");
@@ -546,6 +558,9 @@ function connectGateway(gateway) {
       setGatewayRuntimeState(activeGateway.id, "Offline");
       const wakePrefix = autostartTargetApp ? autostartTargetApp + " — " : "";
       setHomeMessage(wakePrefix + "Waiting for " + gatewayWake.name + " to wake up...", false);
+      if (isAutostartSession) {
+        launchingStatusElement.textContent = "Waiting for " + gatewayWake.name + " to wake up…";
+      }
       updatePlayAvailability();
       reconnectTimer = setTimeout(function () { connectGateway(activeGateway); }, 2000);
       return;
@@ -1153,6 +1168,7 @@ function handleSessionStatus(message) {
     showStreaming();
     resumeGamepadInput();
     setHomeMessage("Streaming", false);
+    autostartEverStreamed = true;
     if (selectedSession && selectedSession.codec === "av1") {
       av1StreamStartTime = performance.now();
       av1DecodeVerified = false;
@@ -1164,7 +1180,7 @@ function handleSessionStatus(message) {
     launchCancellationSent = false;
     closePeerConnection();
     currentSessionId = 0;
-    if (isAutostartSession) {
+    if (isAutostartSession && autostartEverStreamed) {
       exitApplication();
       return;
     }
@@ -1672,6 +1688,9 @@ function showStreaming() {
 }
 
 function showHome(view) {
+  if (isAutostartSession && !autostartFailed && !autostartEverStreamed) {
+    return;
+  }
   homeScreen.hidden = false;
   launchingScreen.hidden = true;
   streamingScreen.hidden = true;
@@ -2072,6 +2091,10 @@ function wakeGateway(gatewayId) {
       renderGateways();
     }
     showNotification("Unable to wake " + gateway.name, errorMessage(error), true);
+    if (isAutostartSession) {
+      launchingStatusElement.textContent = "Unable to wake " + gateway.name + ". Please turn on your PC manually.";
+      autostartFailed = true;
+    }
   });
   connectGateway(gateway);
   return true;
@@ -3630,7 +3653,6 @@ setInterval(function () {
 updateTrackCounts();
 gamepadInputManager.updateDiagnostics();
 syncGamepadUi();
-showHome();
 gamepadUiNavigation.start();
 log("Persistent storage: " + durableStorage.describe());
 detectWebRtcAv1Support();
@@ -3642,6 +3664,34 @@ restoreCachedCapabilities();
 updateInterpolationStatus();
 renderGateways();
 probeSavedGateways();
+
+function showAutostartLaunching(statusText) {
+  homeScreen.hidden = true;
+  streamingScreen.hidden = true;
+  streamMenu.hidden = true;
+  launchingAppElement.textContent = (autostartTargetApp && autostartTargetApp.toLowerCase() === "steam")
+    ? "Steam Big Picture"
+    : (autostartTargetApp || "Application");
+  launchingStatusElement.textContent = statusText || "Connecting to host…";
+  launchingProgressElement.dataset.stage = "1";
+  launchingScreen.hidden = false;
+}
+
+function handleAutostartHostUnreachable(gateway) {
+  if (!isAutostartSession || gatewayConnected || autostartLaunched) {
+    return;
+  }
+  log("Autostart: host " + gateway.name + " (" + gateway.host + ") did not answer on initial connect");
+  if (gateway.macAddress && wakeOnLan.isSupported()) {
+    launchingStatusElement.textContent = "Host offline. Sending Wake-on-LAN to " + gateway.name + "…";
+    log("Autostart: triggering Wake-on-LAN for " + gateway.name);
+    wakeGateway(gateway.id);
+  } else {
+    autostartFailed = true;
+    launchingStatusElement.textContent = "Unable to reach " + gateway.name + " (" + gateway.host + "). Please ensure your PC is powered on.";
+    showNotification("Host unreachable", "Could not connect to " + gateway.name, true);
+  }
+}
 
 function attemptAutostartLaunch() {
   if (!autostartTargetApp || autostartLaunched) {
@@ -3670,14 +3720,10 @@ function attemptAutostartLaunch() {
   if (match) {
     autostartLaunched = true;
     log("Autostart: launching application '" + match.title + "' (ID " + match.id + ")");
-    setHomeMessage("Starting " + match.title + "...", false);
+    launchingAppElement.textContent = match.title;
+    launchingStatusElement.textContent = "Starting " + match.title + "…";
+    launchingProgressElement.dataset.stage = "3";
     showNotification("Steam", "Starting " + match.title + "...", false);
-
-    if (runningAppId && String(runningAppId) !== String(match.id)) {
-      log("Autostart: another application is running (" + runningAppId + "), switching directly to " + match.title);
-      sendGatewayMessage(applicationSessionRequest("switch-session", match.id));
-      return true;
-    }
 
     const optionIndex = Array.prototype.findIndex.call(appSelect.options, function (option) {
       return option.value === String(match.id);
@@ -3685,12 +3731,20 @@ function attemptAutostartLaunch() {
     if (optionIndex >= 0) {
       appSelect.selectedIndex = optionIndex;
     }
+
+    if (runningAppId && String(runningAppId) !== String(match.id)) {
+      log("Autostart: another application is running (" + runningAppId + "), switching directly to " + match.title);
+      sendGatewayMessage(applicationSessionRequest("switch-session", match.id));
+      return true;
+    }
+
     startSelectedSession();
     return true;
   } else {
     log("Autostart: application '" + autostartTargetApp + "' not found in Sunshine application list");
+    autostartFailed = true;
     showNotification("Application not found", "Sunshine did not return '" + autostartTargetApp + "'.", true);
-    setHomeMessage("Application '" + autostartTargetApp + "' not found in Sunshine.", true);
+    launchingStatusElement.textContent = "Application '" + autostartTargetApp + "' not found in Sunshine.";
     return false;
   }
 }
@@ -3702,33 +3756,40 @@ function triggerAutostart(targetAppName) {
   autostartTargetApp = String(targetAppName).trim();
   isAutostartSession = true;
   autostartLaunched = false;
+  autostartEverStreamed = false;
+  autostartFailed = false;
   log("Autostart triggered for target app: " + autostartTargetApp);
 
   if (!savedGateways || savedGateways.length === 0) {
+    autostartFailed = true;
+    showAutostartLaunching("No PC configured. Open Moonlight to add your host PC.");
     showNotification("Setup required", "No PC configured. Open Moonlight to add your host PC.", true);
-    setHomeMessage("No PC configured. Add your host PC in Moonlight first.", true);
     return;
   }
 
   const gateway = activeGateway || savedGateways[0];
-  setHomeMessage(autostartTargetApp + " — Connecting to " + gateway.name + "...", false);
-  showNotification(autostartTargetApp, "Launching shortcut for " + gateway.name + "...", false);
+  showAutostartLaunching("Connecting to " + gateway.name + "…");
 
   if (gatewayConnected && sunshineReady && appsLoaded && applications.length > 0) {
     attemptAutostartLaunch();
     return;
   }
 
-  const state = gatewayRuntimeStates.get(gateway.id);
-  const isOffline = state === "Offline" || (!gatewayConnected && state !== "Online");
-  if (gateway.macAddress && isOffline && wakeOnLan.isSupported()) {
-    wakeGateway(gateway.id);
-  } else if (!gatewayConnected) {
+  if (!gatewayConnected) {
     connectGateway(gateway);
+    if (autostartConnectTimer !== null) {
+      clearTimeout(autostartConnectTimer);
+    }
+    autostartConnectTimer = setTimeout(function () {
+      autostartConnectTimer = null;
+      if (!gatewayConnected && isAutostartSession && !autostartLaunched) {
+        handleAutostartHostUnreachable(gateway);
+      }
+    }, 3500);
   }
 }
 
-function checkRequestedAppControl() {
+function getRequestedAutostartTarget() {
   let targetApp = null;
   try {
     if (window.location && window.location.search) {
@@ -3761,11 +3822,21 @@ function checkRequestedAppControl() {
   } catch (error) {
     log("AppControl check failed: " + errorMessage(error));
   }
+  return targetApp;
+}
 
-  if (targetApp) {
-    triggerAutostart(targetApp);
+function checkRequestedAppControl() {
+  const target = getRequestedAutostartTarget();
+  if (target) {
+    triggerAutostart(target);
   }
 }
 
-checkRequestedAppControl();
+const requestedAutostart = getRequestedAutostartTarget();
+if (requestedAutostart) {
+  triggerAutostart(requestedAutostart);
+} else {
+  showHome();
+}
+
 window.addEventListener("appcontrol", checkRequestedAppControl);
