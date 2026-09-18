@@ -28,6 +28,7 @@ const launchingAppElement = document.getElementById("launching-app");
 const launchingStatusElement = document.getElementById("launching-status");
 const launchingProgressElement = document.getElementById("launching-progress");
 const videoElement = document.getElementById("video");
+const audioElement = document.getElementById("audio");
 const diagnosticsElement = document.getElementById("diagnostics");
 const logElement = document.getElementById("log");
 const playbackPromptElement = document.getElementById("playback-prompt");
@@ -73,6 +74,7 @@ const gatewayRemoveCancelButton = document.getElementById("gateway-remove-cancel
 const gatewayRemoveConfirmButton = document.getElementById("gateway-remove-confirm");
 const playButton = document.getElementById("play-button");
 const continueButton = document.getElementById("continue-button");
+const streamResolutionButton = document.getElementById("stream-resolution-button");
 const streamFpsButton = document.getElementById("stream-fps-button");
 const streamBitrateButton = document.getElementById("stream-bitrate-button");
 const statsOverlayButton = document.getElementById("stats-overlay-button");
@@ -172,8 +174,14 @@ const GAMEPAD_BUTTONS = {
 };
 
 const remoteStream = new MediaStream();
-videoElement.srcObject = remoteStream;
-videoElement.muted = false;
+const remoteVideoStream = new MediaStream();
+const remoteAudioStream = new MediaStream();
+videoElement.srcObject = remoteVideoStream;
+videoElement.muted = true;
+if (audioElement) {
+  audioElement.srcObject = remoteAudioStream;
+  audioElement.muted = false;
+}
 
 let socket = null;
 let reconnectTimer = null;
@@ -197,6 +205,7 @@ let sessionTeardownInProgress = false;
 let launchCancellationRequested = false;
 let launchCancellationSent = false;
 let openSettingSelect = null;
+let openSelectorReturnElement = null;
 let videoModes = [];
 let codecSelectionWasIntentional = false;
 let updatingCodecOptions = false;
@@ -219,6 +228,9 @@ let currentGatewayName = "Moonlight Gateway";
 let savedPreferences = preferences.load();
 let savedGateways = gatewayStore.load();
 let activeGateway = null;
+let autostartTargetApp = null;
+let isAutostartSession = false;
+let autostartLaunched = false;
 let pendingGatewayValidation = null;
 let gatewayValidationTimer = null;
 let gatewayEditorState = null;
@@ -478,8 +490,10 @@ function connectGateway(gateway) {
   setGatewayRuntimeState(activeGateway.id, "Connecting");
 
   gatewayStateElement.textContent = "Connecting";
+  const wakePrefix = autostartTargetApp ? autostartTargetApp + " — " : "";
   setHomeMessage(gatewayWakeIsActive(activeGateway.id)
-    ? "Waiting for " + gatewayWake.name + " to wake up..." : "Connecting to Gateway...", false);
+    ? wakePrefix + "Waiting for " + gatewayWake.name + " to wake up..."
+    : (autostartTargetApp ? autostartTargetApp + " — Connecting to " + activeGateway.name + "..." : "Connecting to Gateway..."), false);
   try {
     socket = new WebSocket(gatewayWebSocketUrl(activeGateway));
   } catch (error) {
@@ -530,7 +544,8 @@ function connectGateway(gateway) {
     // they are rather than returning them to the Gateway list on every attempt.
     if (activeGateway && gatewayWakeIsActive(activeGateway.id)) {
       setGatewayRuntimeState(activeGateway.id, "Offline");
-      setHomeMessage("Waiting for " + gatewayWake.name + " to wake up...", false);
+      const wakePrefix = autostartTargetApp ? autostartTargetApp + " — " : "";
+      setHomeMessage(wakePrefix + "Waiting for " + gatewayWake.name + " to wake up...", false);
       updatePlayAvailability();
       reconnectTimer = setTimeout(function () { connectGateway(activeGateway); }, 2000);
       return;
@@ -1007,6 +1022,9 @@ function applyApplications(nextApplications) {
     openApplicationsAfterConnection = false;
     ui.showApplications();
   }
+  if (autostartTargetApp && !autostartLaunched) {
+    attemptAutostartLaunch();
+  }
 }
 
 function setRunningApplication(appId) {
@@ -1058,7 +1076,6 @@ function updateLaunchingScreen(state) {
 function showLaunching() {
   homeScreen.hidden = true;
   streamingScreen.hidden = true;
-  videoElement.hidden = true;
   launchingAppElement.textContent = selectedSession ? selectedSession.appTitle : "Application";
   launchingScreen.hidden = false;
   updateLaunchingScreen("starting");
@@ -1144,6 +1161,10 @@ function handleSessionStatus(message) {
     launchCancellationSent = false;
     closePeerConnection();
     currentSessionId = 0;
+    if (isAutostartSession) {
+      exitApplication();
+      return;
+    }
     showHome("applications");
     setHomeMessage("Stream disconnected. Running applications remain available.", false);
     showNotification("Streaming disconnected", "Choose an application to resume or launch.", false);
@@ -1384,23 +1405,60 @@ function createPeerConnection(sessionId) {
   };
 
   peerConnection.ontrack = function (event) {
+    if (event.receiver) {
+      try {
+        if ("playoutDelayHint" in event.receiver) {
+          event.receiver.playoutDelayHint = 0;
+        }
+        if ("jitterBufferTarget" in event.receiver) {
+          event.receiver.jitterBufferTarget = 0;
+        }
+      } catch (e) {}
+    }
+
     event.track.enabled = !document.hidden;
     const alreadyAdded = remoteStream.getTracks().some(function (track) {
       return track.id === event.track.id;
     });
     if (!alreadyAdded) {
       remoteStream.addTrack(event.track);
+      if (event.track.kind === "video") {
+        remoteVideoStream.addTrack(event.track);
+      } else if (event.track.kind === "audio") {
+        remoteAudioStream.addTrack(event.track);
+      }
     }
     updateTrackCounts();
     event.track.addEventListener("ended", function () {
       const currentTrack = remoteStream.getTrackById(event.track.id);
       if (currentTrack) {
         remoteStream.removeTrack(currentTrack);
+        if (currentTrack.kind === "video") {
+          remoteVideoStream.removeTrack(currentTrack);
+        } else if (currentTrack.kind === "audio") {
+          remoteAudioStream.removeTrack(currentTrack);
+        }
         updateTrackCounts();
       }
     });
     startPlayback();
   };
+}
+
+function applyLowLatencyReceivers() {
+  if (!peerConnection || typeof peerConnection.getReceivers !== "function") {
+    return;
+  }
+  peerConnection.getReceivers().forEach(function (receiver) {
+    try {
+      if ("playoutDelayHint" in receiver) {
+        receiver.playoutDelayHint = 0;
+      }
+      if ("jitterBufferTarget" in receiver) {
+        receiver.jitterBufferTarget = 0;
+      }
+    } catch (e) {}
+  });
 }
 
 async function applyRemoteCandidate(candidate) {
@@ -1442,6 +1500,7 @@ async function handleOffer(message) {
 
   try {
     await peerConnection.setRemoteDescription({ type: "offer", sdp: message.sdp });
+    applyLowLatencyReceivers();
     while (pendingRemoteCandidates.length > 0) {
       await applyRemoteCandidate(pendingRemoteCandidates.shift());
     }
@@ -1483,24 +1542,37 @@ function closePeerConnection() {
     remoteStream.removeTrack(track);
     track.stop();
   });
+  remoteVideoStream.getTracks().forEach(function (track) {
+    remoteVideoStream.removeTrack(track);
+  });
+  remoteAudioStream.getTracks().forEach(function (track) {
+    remoteAudioStream.removeTrack(track);
+  });
   updateTrackCounts();
   frameInterpolation.setEnabled(false);
-  videoElement.hidden = true;
   playbackPromptElement.hidden = true;
   connectionStateElement.textContent = "closed";
   iceStateElement.textContent = "closed";
 }
 
 async function startPlayback() {
-  videoElement.muted = false;
+  videoElement.muted = true;
   try {
     await videoElement.play();
-    playbackPromptElement.hidden = true;
   } catch (error) {
-    playbackPromptElement.hidden = false;
-    if (!playbackErrorReported) {
-      playbackErrorReported = true;
-      log("Audio playback requires pressing OK");
+    // Video play error
+  }
+  if (audioElement) {
+    audioElement.muted = false;
+    try {
+      await audioElement.play();
+      playbackPromptElement.hidden = true;
+    } catch (error) {
+      playbackPromptElement.hidden = false;
+      if (!playbackErrorReported) {
+        playbackErrorReported = true;
+        log("Audio playback requires pressing OK");
+      }
     }
   }
 }
@@ -1589,9 +1661,9 @@ function showStreaming() {
   homeScreen.hidden = true;
   launchingScreen.hidden = true;
   streamingScreen.hidden = false;
-  videoElement.hidden = false;
   updateStreamOverlay();
   showOverlayTemporarily();
+  applyLowLatencyReceivers();
   startPlayback();
   applyFrameInterpolation();
 }
@@ -1617,6 +1689,26 @@ function showHome(view) {
 }
 
 function updateStreamMenuControls() {
+  if (streamResolutionButton) {
+    const sessionResKey = selectedSession
+      ? (String(selectedSession.width) + "x" + String(selectedSession.height))
+      : resolutionSelect.value;
+    let resLabel = null;
+    if (resolutionSelect.options) {
+      for (let i = 0; i < resolutionSelect.options.length; i++) {
+        if (resolutionSelect.options[i].value === sessionResKey) {
+          resLabel = resolutionSelect.options[i].textContent;
+          break;
+        }
+      }
+    }
+    if (!resLabel) {
+      resLabel = selectedSession
+        ? (String(selectedSession.width) + " × " + String(selectedSession.height))
+        : (resolutionSelect.value ? resolutionSelect.value.replace("x", " × ") : "1920 × 1080");
+    }
+    streamResolutionButton.textContent = "Resolution: " + resLabel;
+  }
   const currentFps = selectedSession ? selectedSession.fps : (Number(fpsSelect.value) || 60);
   if (streamFpsButton) {
     streamFpsButton.textContent = "FPS: " + String(currentFps) + " FPS";
@@ -1627,77 +1719,175 @@ function updateStreamMenuControls() {
   }
 }
 
-function cycleStreamFps() {
-  const availableFps = [30, 60, 120];
-  const currentFps = selectedSession ? selectedSession.fps : (Number(fpsSelect.value) || 60);
-  let nextIndex = (availableFps.indexOf(currentFps) + 1) % availableFps.length;
-  if (nextIndex < 0) {
-    nextIndex = 0;
+function openStreamResolutionSelector() {
+  if (!resolutionSelect.options || resolutionSelect.options.length === 0) {
+    return;
   }
-  const nextFps = availableFps[nextIndex];
+  const currentResVal = selectedSession
+    ? (String(selectedSession.width) + "x" + String(selectedSession.height))
+    : resolutionSelect.value;
 
-  fpsSelect.value = String(nextFps);
-  applySelectedVideoMode();
-  persistCurrentPreferences();
+  const items = Array.prototype.map.call(resolutionSelect.options, function (option) {
+    return {
+      value: option.value,
+      label: option.textContent,
+    };
+  });
 
-  if (selectedSession) {
-    selectedSession.fps = nextFps;
-    updateStreamOverlay();
-  }
-  updateStreamMenuControls();
-
-  if (sessionState === "streaming") {
-    const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
-    if (targetAppId) {
-      try {
-        setHomeMessage("Switching stream to " + String(nextFps) + " FPS...", false);
-        showNotification("Stream Settings", "Switching to " + String(nextFps) + " FPS...", false);
-        sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
-        hideStreamMenu();
-      } catch (error) {
-        reportError("Failed to switch stream FPS", error);
+  openSelectorModal(
+    "Resolution",
+    items,
+    function (item) {
+      return item.value === currentResVal;
+    },
+    function (item) {
+      if (item.value === currentResVal) {
+        return;
       }
-    }
-  }
+      resolutionSelect.value = item.value;
+      applySelectedVideoMode();
+      persistCurrentPreferences();
+
+      const dimensions = item.value.split("x");
+      const nextWidth = Number(dimensions[0]);
+      const nextHeight = Number(dimensions[1]);
+
+      if (selectedSession) {
+        selectedSession.width = nextWidth;
+        selectedSession.height = nextHeight;
+        selectedSession.fps = Number(fpsSelect.value) || 60;
+        selectedSession.bitrateKbps = Number(bitrateSelect.value);
+        selectedSession.codec = codecSelect.value;
+        selectedSession.hdr = hdrSelect.value === "true";
+        updateStreamOverlay();
+      }
+      updateStreamMenuControls();
+
+      if (sessionState === "streaming") {
+        const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
+        if (targetAppId) {
+          try {
+            setHomeMessage("Switching resolution to " + item.label + "...", false);
+            showNotification("Stream Settings", "Switching resolution to " + item.label + "...", false);
+            sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
+            hideStreamMenu();
+          } catch (error) {
+            reportError("Failed to switch stream resolution", error);
+          }
+        }
+      }
+    },
+    streamResolutionButton
+  );
 }
 
-function cycleStreamBitrate() {
+function openStreamFpsSelector() {
+  let items = [];
+  if (fpsSelect.options && fpsSelect.options.length > 0) {
+    items = Array.prototype.map.call(fpsSelect.options, function (option) {
+      return {
+        value: option.value,
+        label: option.textContent,
+      };
+    });
+  } else {
+    items = [
+      { value: "30", label: "30 FPS" },
+      { value: "60", label: "60 FPS" },
+      { value: "120", label: "120 FPS — Experimental" },
+    ];
+  }
+  const currentFps = selectedSession ? selectedSession.fps : (Number(fpsSelect.value) || 60);
+
+  openSelectorModal(
+    "Frame Rate",
+    items,
+    function (item) {
+      return Number(item.value) === currentFps;
+    },
+    function (item) {
+      const nextFps = Number(item.value);
+      if (nextFps === currentFps) {
+        return;
+      }
+      fpsSelect.value = String(nextFps);
+      applySelectedVideoMode();
+      persistCurrentPreferences();
+
+      if (selectedSession) {
+        selectedSession.fps = nextFps;
+        updateStreamOverlay();
+      }
+      updateStreamMenuControls();
+
+      if (sessionState === "streaming") {
+        const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
+        if (targetAppId) {
+          try {
+            setHomeMessage("Switching stream to " + String(nextFps) + " FPS...", false);
+            showNotification("Stream Settings", "Switching to " + String(nextFps) + " FPS...", false);
+            sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
+            hideStreamMenu();
+          } catch (error) {
+            reportError("Failed to switch stream FPS", error);
+          }
+        }
+      }
+    },
+    streamFpsButton
+  );
+}
+
+function openStreamBitrateSelector() {
   if (!bitrateSelect.options || bitrateSelect.options.length === 0) {
     return;
   }
-  let currentIndex = -1;
   const currentBitrate = selectedSession ? selectedSession.bitrateKbps : Number(bitrateSelect.value);
-  for (let i = 0; i < bitrateSelect.options.length; i++) {
-    if (Number(bitrateSelect.options[i].value) === currentBitrate) {
-      currentIndex = i;
-      break;
-    }
-  }
-  const nextIndex = (currentIndex + 1) % bitrateSelect.options.length;
-  bitrateSelect.selectedIndex = nextIndex;
-  const nextBitrate = Number(bitrateSelect.value);
-  persistCurrentPreferences();
 
-  if (selectedSession) {
-    selectedSession.bitrateKbps = nextBitrate;
-    updateStreamOverlay();
-  }
-  updateStreamMenuControls();
+  const items = Array.prototype.map.call(bitrateSelect.options, function (option) {
+    return {
+      value: option.value,
+      label: option.textContent,
+    };
+  });
 
-  if (sessionState === "streaming") {
-    const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
-    if (targetAppId) {
-      try {
-        const mbps = Math.round(nextBitrate / 1000);
-        setHomeMessage("Switching bitrate to " + String(mbps) + " Mbps...", false);
-        showNotification("Stream Settings", "Switching to " + String(mbps) + " Mbps...", false);
-        sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
-        hideStreamMenu();
-      } catch (error) {
-        reportError("Failed to switch stream bitrate", error);
+  openSelectorModal(
+    "Bitrate",
+    items,
+    function (item) {
+      return Number(item.value) === currentBitrate;
+    },
+    function (item) {
+      const nextBitrate = Number(item.value);
+      if (nextBitrate === currentBitrate) {
+        return;
       }
-    }
-  }
+      bitrateSelect.value = String(nextBitrate);
+      persistCurrentPreferences();
+
+      if (selectedSession) {
+        selectedSession.bitrateKbps = nextBitrate;
+        updateStreamOverlay();
+      }
+      updateStreamMenuControls();
+
+      if (sessionState === "streaming") {
+        const targetAppId = (selectedSession && selectedSession.appId) || runningAppId || (appSelect ? appSelect.value : null);
+        if (targetAppId) {
+          try {
+            const mbps = Math.round(nextBitrate / 1000);
+            setHomeMessage("Switching bitrate to " + String(mbps) + " Mbps...", false);
+            showNotification("Stream Settings", "Switching to " + String(mbps) + " Mbps...", false);
+            sendGatewayMessage(applicationSessionRequest("switch-session", targetAppId));
+            hideStreamMenu();
+          } catch (error) {
+            reportError("Failed to switch stream bitrate", error);
+          }
+        }
+      }
+    },
+    streamBitrateButton
+  );
 }
 
 function showStreamMenu() {
@@ -2353,9 +2543,46 @@ function closeSettingsSelector() {
   settingsSelectorMenu.hidden = true;
   settingsSelectorOptions.textContent = "";
   const select = openSettingSelect;
+  const returnEl = openSelectorReturnElement;
   openSettingSelect = null;
-  if (select) {
+  openSelectorReturnElement = null;
+  if (returnEl) {
+    returnEl.focus();
+  } else if (select) {
     select.focus();
+  }
+  return true;
+}
+
+function openSelectorModal(heading, items, isCurrentPredicate, onSelect, returnElement) {
+  openSettingSelect = (returnElement && returnElement.tagName === "SELECT") ? returnElement : null;
+  openSelectorReturnElement = returnElement || null;
+  settingsSelectorHeading.textContent = heading;
+  settingsSelectorOptions.textContent = "";
+
+  (items || []).forEach(function (item, index) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "settings-selector-option focusable";
+    button.textContent = item.label;
+    button.dataset.optionIndex = String(index);
+    if (isCurrentPredicate && isCurrentPredicate(item, index)) {
+      button.classList.add("is-current");
+    }
+    button.addEventListener("click", function () {
+      closeSettingsSelector();
+      if (typeof onSelect === "function") {
+        onSelect(item, index);
+      }
+    });
+    settingsSelectorOptions.appendChild(button);
+  });
+
+  settingsSelectorMenu.hidden = false;
+  const currentOption = settingsSelectorOptions.querySelector(".is-current");
+  const initialFocus = currentOption || settingsSelectorOptions.querySelector(".focusable");
+  if (initialFocus) {
+    initialFocus.focus();
   }
   return true;
 }
@@ -2364,30 +2591,26 @@ function openSettingsSelector(select) {
   if (!select || select.disabled || select.tagName !== "SELECT") {
     return false;
   }
-  openSettingSelect = select;
-  settingsSelectorHeading.textContent = settingLabel(select);
-  settingsSelectorOptions.textContent = "";
-  Array.prototype.forEach.call(select.options, function (option, index) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "settings-selector-option focusable";
-    button.textContent = option.textContent;
-    button.dataset.optionIndex = String(index);
-    button.classList.toggle("is-current", option.selected);
-    button.addEventListener("click", function () {
-      if (!openSettingSelect) {
-        return;
-      }
-      openSettingSelect.selectedIndex = Number(button.dataset.optionIndex);
-      openSettingSelect.dispatchEvent(new Event("change"));
-      closeSettingsSelector();
-    });
-    settingsSelectorOptions.appendChild(button);
+  const items = Array.prototype.map.call(select.options, function (option) {
+    return {
+      value: option.value,
+      label: option.textContent,
+    };
   });
-  settingsSelectorMenu.hidden = false;
-  const selected = settingsSelectorOptions.querySelector(".is-current");
-  (selected || settingsSelectorOptions.querySelector(".focusable")).focus();
-  return true;
+  return openSelectorModal(
+    settingLabel(select),
+    items,
+    function (item, index) {
+      return select.selectedIndex === index;
+    },
+    function (item, index) {
+      if (select.selectedIndex !== index) {
+        select.selectedIndex = index;
+        select.dispatchEvent(new Event("change"));
+      }
+    },
+    select
+  );
 }
 
 function isGameplayInputActive() {
@@ -2548,6 +2771,11 @@ function goBackFromUiInput() {
   if (cancelLaunchingSession()) {
     return true;
   }
+  if (isAutostartSession && (gatewayWake || sessionState === "idle" || sessionState === "starting")) {
+    cancelGatewayWake();
+    exitApplication();
+    return true;
+  }
   if (!streamingScreen.hidden) {
     if (streamMenu.hidden) {
       showStreamMenu();
@@ -2628,11 +2856,14 @@ document.addEventListener("keydown", function (event) {
 
 playButton.addEventListener("click", startSelectedSession);
 continueButton.addEventListener("click", hideStreamMenu);
+if (streamResolutionButton) {
+  streamResolutionButton.addEventListener("click", openStreamResolutionSelector);
+}
 if (streamFpsButton) {
-  streamFpsButton.addEventListener("click", cycleStreamFps);
+  streamFpsButton.addEventListener("click", openStreamFpsSelector);
 }
 if (streamBitrateButton) {
-  streamBitrateButton.addEventListener("click", cycleStreamBitrate);
+  streamBitrateButton.addEventListener("click", openStreamBitrateSelector);
 }
 statsOverlayButton.addEventListener("click", toggleStatsOverlay);
 diagnosticsButton.addEventListener("click", toggleDiagnostics);
@@ -3408,3 +3639,109 @@ restoreCachedCapabilities();
 updateInterpolationStatus();
 renderGateways();
 probeSavedGateways();
+
+function attemptAutostartLaunch() {
+  if (!autostartTargetApp || autostartLaunched || !applications || applications.length === 0) {
+    return false;
+  }
+  const query = autostartTargetApp.toLowerCase().trim();
+  let match = applications.find(function (app) {
+    return String(app.title).toLowerCase().trim() === query;
+  });
+  if (!match) {
+    match = applications.find(function (app) {
+      return String(app.title).toLowerCase().includes(query);
+    });
+  }
+  if (!match && query === "steam") {
+    match = applications.find(function (app) {
+      return String(app.title).toLowerCase().includes("big picture");
+    });
+  }
+
+  if (match) {
+    autostartLaunched = true;
+    log("Autostart: launching application '" + match.title + "' (ID " + match.id + ")");
+    setHomeMessage("Starting " + match.title + "...", false);
+    showNotification("Steam", "Starting " + match.title + "...", false);
+    launchApplication(match.id);
+    return true;
+  } else {
+    log("Autostart: application '" + autostartTargetApp + "' not found in Sunshine application list");
+    showNotification("Application not found", "Sunshine did not return '" + autostartTargetApp + "'.", true);
+    setHomeMessage("Application '" + autostartTargetApp + "' not found in Sunshine.", true);
+    return false;
+  }
+}
+
+function triggerAutostart(targetAppName) {
+  if (!targetAppName) {
+    return;
+  }
+  autostartTargetApp = String(targetAppName).trim();
+  isAutostartSession = true;
+  autostartLaunched = false;
+  log("Autostart triggered for target app: " + autostartTargetApp);
+
+  if (!savedGateways || savedGateways.length === 0) {
+    showNotification("Setup required", "No PC configured. Open Moonlight to add your host PC.", true);
+    setHomeMessage("No PC configured. Add your host PC in Moonlight first.", true);
+    return;
+  }
+
+  const gateway = activeGateway || savedGateways[0];
+  setHomeMessage(autostartTargetApp + " — Connecting to " + gateway.name + "...", false);
+  showNotification(autostartTargetApp, "Launching shortcut for " + gateway.name + "...", false);
+
+  if (gatewayConnected && appsLoaded && applications.length > 0) {
+    attemptAutostartLaunch();
+    return;
+  }
+
+  const state = gatewayRuntimeStates.get(gateway.id);
+  if (gateway.macAddress && (state === "Offline" || !gatewayConnected) && wakeOnLan.isSupported()) {
+    wakeGateway(gateway.id);
+  }
+  if (!gatewayConnected) {
+    connectGateway(gateway);
+  }
+}
+
+function checkRequestedAppControl() {
+  let targetApp = null;
+  try {
+    if (window.location && window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("autostart")) {
+        targetApp = params.get("autostart");
+      }
+    }
+  } catch (_e) {}
+
+  try {
+    if (window.tizen && tizen.application) {
+      const reqAppControl = tizen.application.getCurrentApplication().getRequestedAppControl();
+      if (reqAppControl && reqAppControl.appControl) {
+        const appControl = reqAppControl.appControl;
+        if (Array.isArray(appControl.data)) {
+          for (let i = 0; i < appControl.data.length; i++) {
+            const item = appControl.data[i];
+            if (item.key === "autostart" && Array.isArray(item.value) && item.value.length > 0) {
+              targetApp = item.value[0];
+              break;
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    log("AppControl check failed: " + errorMessage(error));
+  }
+
+  if (targetApp) {
+    triggerAutostart(targetApp);
+  }
+}
+
+checkRequestedAppControl();
+window.addEventListener("appcontrol", checkRequestedAppControl);

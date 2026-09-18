@@ -1,0 +1,77 @@
+:root {
+  --bg-gradient: radial-gradient(circle at center, #1b2838 0%, #0d121a 100%);
+  --steam-blue: #66c0f4;
+  --text-primary: #ffffff;
+  --text-muted: #8f98a0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0d121a;
+  background: var(--bg-gradient);
+  color: var(--text-primary);
+  font-family: Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splash-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 24px;
+}
+
+.steam-logo {
+  width: 160px;
+  height: 160px;
+  filter: drop-shadow(0 0 25px rgba(102, 192, 244, 0.45));
+  animation: pulse 2.5s infinite ease-in-out;
+}
+
+h1 {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.status-message {
+  font-size: 22px;
+  color: var(--text-muted);
+  max-width: 600px;
+  line-height: 1.4;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid rgba(102, 192, 244, 0.2);
+  border-top-color: var(--steam-blue);
+  border-radius: 50%;
+  animation: spin 0.9s infinite linear;
+}
+
+.error-message {
+  color: #ff6b6b;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50% { transform: scale(1.04); opacity: 1; }
+}

@@ -1,21 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget xmlns="http://www.w3.org/ns/widgets"
         xmlns:tizen="http://tizen.org/ns/widgets"
-        id="http://moonlight-webrtc.local/MoonlightWebRTCTest"
+        id="http://moonlight-webrtc.local/SteamBigPicture"
         version="1.0.0"
         viewmodes="maximized">
-    <tizen:application id="MlWrtcTst1.MoonlightWebRTCTest"
-                       package="MlWrtcTst1"
-                       required_version="5.5">
-        <tizen:app-control>
-            <tizen:operation name="http://tizen.org/appcontrol/operation/view"/>
-        </tizen:app-control>
-    </tizen:application>
+    <tizen:application id="MlWrtcStm1.SteamBigPicture"
+                       package="MlWrtcStm1"
+                       required_version="5.5"/>
     <content src="index.html"/>
-    <icon src="assets/moonlight-icon.png"/>
-    <name>Moonlight WebRTC Client</name>
+    <icon src="assets/steam-icon.png"/>
+    <name>Steam Big Picture</name>
     <access origin="*" subdomains="true"/>
-    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
     <tizen:profile name="tv-samsung"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/use.game.mode" value="true" />
     <tizen:setting screen-orientation="landscape"

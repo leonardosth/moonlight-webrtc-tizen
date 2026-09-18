@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="ui.css">
 </head>
 <body>
-  <video id="video" autoplay playsinline hidden></video>
+  <video id="video" autoplay playsinline></video>
+  <audio id="audio" autoplay playsinline></audio>
   <canvas id="interpolation-canvas" hidden></canvas>
   <main id="home-screen" class="app-shell" aria-label="Moonlight WebRTC Client">
     <header id="top-bar" class="top-bar">
@@ -100,7 +101,7 @@
       <div class="stats-row"><span class="stats-label">Pkt Loss</span><span id="stats-packet-loss" class="stats-value">0</span></div>
       <div class="stats-row"><span class="stats-label">Jitter</span><span id="stats-jitter" class="stats-value">—</span></div>
     </aside>
-    <div id="stream-menu" class="stream-menu" hidden><section class="menu-panel" aria-label="Stream menu"><h2>Streaming</h2><div class="menu-actions"><button id="continue-button" class="menu-button focusable" type="button">Resume</button><button id="stream-fps-button" class="menu-button focusable" type="button">FPS: 60 FPS</button><button id="stream-bitrate-button" class="menu-button focusable" type="button">Bitrate: 50 Mbps</button><button id="stats-overlay-button" class="menu-button focusable" type="button">Show stats overlay</button><button id="diagnostics-button" class="menu-button focusable" type="button">Show statistics</button><button id="stop-button" class="menu-button menu-button-danger focusable" type="button">Stop streaming</button></div><p class="menu-hint"><kbd>OK</kbd> Select <kbd class="back-key">&#8592;</kbd> Resume</p></section></div>
+    <div id="stream-menu" class="stream-menu" hidden><section class="menu-panel" aria-label="Stream menu"><h2>Streaming</h2><div class="menu-actions"><button id="continue-button" class="menu-button focusable" type="button">Resume</button><button id="stream-resolution-button" class="menu-button focusable" type="button">Resolution: 1920 × 1080</button><button id="stream-fps-button" class="menu-button focusable" type="button">FPS: 60 FPS</button><button id="stream-bitrate-button" class="menu-button focusable" type="button">Bitrate: 50 Mbps</button><button id="stats-overlay-button" class="menu-button focusable" type="button">Show stats overlay</button><button id="diagnostics-button" class="menu-button focusable" type="button">Show statistics</button><button id="stop-button" class="menu-button menu-button-danger focusable" type="button">Stop streaming</button></div><p class="menu-hint"><kbd>OK</kbd> Select <kbd class="back-key">&#8592;</kbd> Resume</p></section></div>
   </section>
 
   <aside id="diagnostics" class="diagnostics" hidden aria-label="WebRTC diagnostics">

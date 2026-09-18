@@ -61,7 +61,8 @@ constexpr std::uint32_t AudioRtpClockRate = 48000;
 constexpr auto VideoSamplePath = "samples/test-720p60.h264";
 constexpr auto AudioSamplePath = "samples/test-tone-48k-stereo.opus";
 constexpr auto RtpCname = "moonlight-webrtc";
-constexpr auto MediaStreamId = "stream1";
+constexpr auto VideoMediaStreamId = "video-stream";
+constexpr auto AudioMediaStreamId = "audio-stream";
 // Artwork is capped at 8 MiB before Base64 and JSON framing expand it for WebSocket transport.
 constexpr std::size_t MaxGatewayWebSocketMessageSize = 12 * 1024 * 1024;
 volatile std::sig_atomic_t ConsoleShutdownRequested = 0;
@@ -660,7 +661,7 @@ private:
                 gateway::PreferredWebRtcColorSpaceExtensionId,
                 std::string(gateway::WebRtcColorSpaceExtensionUri)));
         }
-        video.addSSRC(VideoSsrc, RtpCname, MediaStreamId, "video");
+        video.addSSRC(VideoSsrc, RtpCname, VideoMediaStreamId, "video");
 
         session->videoTrack = peerConnection->addTrack(video);
 
@@ -725,7 +726,7 @@ private:
         audio.addOpusCodec(
             AudioPayloadType,
             "minptime=20;maxaveragebitrate=128000;stereo=1;sprop-stereo=1;useinbandfec=0");
-        audio.addSSRC(AudioSsrc, RtpCname, MediaStreamId, "audio");
+        audio.addSSRC(AudioSsrc, RtpCname, AudioMediaStreamId, "audio");
 
         session->audioTrack = peerConnection->addTrack(audio);
 

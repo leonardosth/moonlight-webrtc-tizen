@@ -9,90 +9,109 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$projectDirectory = Join-Path $repositoryRoot 'tizen'
 $outputDirectory = Join-Path $repositoryRoot 'dist\tizen'
-$sourceDirectory = Join-Path $outputDirectory '.source'
-$buildDirectory = Join-Path $outputDirectory '.build'
-$packageDirectory = Join-Path $outputDirectory '.package'
-$artifact = Join-Path $outputDirectory 'MoonlightWebRTC.wgt'
 
 if (-not (Test-Path -LiteralPath $TizenCli -PathType Leaf)) {
     throw "Tizen CLI was not found: $TizenCli"
 }
-if (-not (Test-Path -LiteralPath (Join-Path $projectDirectory 'config.xml') -PathType Leaf)) {
-    throw "Tizen project config is missing: $projectDirectory"
-}
 
-if (Test-Path -LiteralPath $buildDirectory) {
-    Remove-Item -LiteralPath $buildDirectory -Recurse -Force
-}
-if (Test-Path -LiteralPath $sourceDirectory) {
-    Remove-Item -LiteralPath $sourceDirectory -Recurse -Force
-}
-if (Test-Path -LiteralPath $packageDirectory) {
-    Remove-Item -LiteralPath $packageDirectory -Recurse -Force
-}
-New-Item -ItemType Directory -Path $outputDirectory, $sourceDirectory, $packageDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-try {
-    $runtimeFiles = @(
-        'app.js',
-        'application-artwork.js',
-        'config.xml',
-        'durable-storage.js',
-        'frame-interpolation.js',
-        'gamepad-input.js',
-        'gamepad-ui-navigation.js',
-        'gateway-ipv4.js',
-        'gateway-store.js',
-        'index.html',
-        'preferences.js',
-        'tizen_web_project.yaml',
-        'ui.css',
-        'ui.js',
-        'wake-on-lan.js'
+function Build-TizenWidget {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][string]$SourceDir,
+        [Parameter(Mandatory=$true)][string]$ArtifactName,
+        [string[]]$Files,
+        [switch]$IncludeWasm
     )
-    foreach ($runtimeFile in $runtimeFiles) {
-        $filePath = Join-Path $projectDirectory $runtimeFile
-        if (Test-Path -LiteralPath $filePath) {
-            Copy-Item -LiteralPath $filePath -Destination $sourceDirectory
-        }
-    }
-    Copy-Item -LiteralPath (Join-Path $projectDirectory 'assets') -Destination $sourceDirectory -Recurse
+
+    Write-Host "--- Building $Name ($ArtifactName) ---"
+    $stageDir = Join-Path $outputDirectory '.source'
+    $buildDir = Join-Path $outputDirectory '.build'
+    $packageDir = Join-Path $outputDirectory '.package'
+    $targetArtifact = Join-Path $outputDirectory $ArtifactName
+
+    if (Test-Path -LiteralPath $stageDir) { Remove-Item -LiteralPath $stageDir -Recurse -Force }
+    if (Test-Path -LiteralPath $buildDir) { Remove-Item -LiteralPath $buildDir -Recurse -Force }
+    if (Test-Path -LiteralPath $packageDir) { Remove-Item -LiteralPath $packageDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $stageDir, $packageDir -Force | Out-Null
+
     try {
-        & (Join-Path $PSScriptRoot 'build-wake-on-lan.ps1') -OutputDirectory (Join-Path $sourceDirectory 'wasm') -EmsdkRoot $EmsdkRoot
-    } catch {
-        Write-Warning "Wake-on-LAN WASM build skipped: $_"
-        New-Item -ItemType Directory -Path (Join-Path $sourceDirectory 'wasm') -Force | Out-Null
-    }
+        if ($Files -and $Files.Length -gt 0) {
+            foreach ($file in $Files) {
+                $filePath = Join-Path $SourceDir $file
+                if (Test-Path -LiteralPath $filePath) {
+                    Copy-Item -LiteralPath $filePath -Destination $stageDir
+                }
+            }
+            if (Test-Path -LiteralPath (Join-Path $SourceDir 'assets')) {
+                Copy-Item -LiteralPath (Join-Path $SourceDir 'assets') -Destination $stageDir -Recurse
+            }
+        } else {
+            Copy-Item -Path "$SourceDir\*" -Destination $stageDir -Recurse
+        }
 
-    & $TizenCli build-web --output $buildDirectory -- $sourceDirectory
-    if ($LASTEXITCODE -ne 0) {
-        throw "Tizen web build failed with exit code $LASTEXITCODE."
-    }
-    Remove-Item -LiteralPath (Join-Path $buildDirectory 'tizen_web_project.yaml') -Force -ErrorAction SilentlyContinue
+        if ($IncludeWasm) {
+            try {
+                & (Join-Path $PSScriptRoot 'build-wake-on-lan.ps1') -OutputDirectory (Join-Path $stageDir 'wasm') -EmsdkRoot $EmsdkRoot
+            } catch {
+                Write-Warning "Wake-on-LAN WASM build skipped: $_"
+                New-Item -ItemType Directory -Path (Join-Path $stageDir 'wasm') -Force | Out-Null
+            }
+        }
 
-    $packageArguments = @('package', '-t', 'wgt', '--output', $packageDirectory)
-    if (-not [string]::IsNullOrWhiteSpace($SigningProfile)) {
-        $packageArguments += @('-s', $SigningProfile)
-    }
-    $packageArguments += @('--', $buildDirectory)
-    & $TizenCli @packageArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Tizen WGT package signing failed with exit code $LASTEXITCODE."
-    }
+        & $TizenCli build-web --output $buildDir -- $stageDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tizen web build failed for $Name with exit code $LASTEXITCODE."
+        }
+        Remove-Item -LiteralPath (Join-Path $buildDir 'tizen_web_project.yaml') -Force -ErrorAction SilentlyContinue
 
-    $packages = @(Get-ChildItem -LiteralPath $packageDirectory -Filter '*.wgt' -File)
-    if ($packages.Count -ne 1) {
-        throw "Expected one generated WGT, found $($packages.Count)."
+        $packageArguments = @('package', '-t', 'wgt', '--output', $packageDir)
+        if (-not [string]::IsNullOrWhiteSpace($SigningProfile)) {
+            $packageArguments += @('-s', $SigningProfile)
+        }
+        $packageArguments += @('--', $buildDir)
+        & $TizenCli @packageArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tizen WGT package signing failed for $Name with exit code $LASTEXITCODE."
+        }
+
+        $packages = @(Get-ChildItem -LiteralPath $packageDir -Filter '*.wgt' -File)
+        if ($packages.Count -ne 1) {
+            throw "Expected one generated WGT for $Name, found $($packages.Count)."
+        }
+        if (Test-Path -LiteralPath $targetArtifact) {
+            Remove-Item -LiteralPath $targetArtifact -Force
+        }
+        Move-Item -LiteralPath $packages[0].FullName -Destination $targetArtifact
+        Write-Host "Tizen WGT created: $targetArtifact"
+    } finally {
+        Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $packageDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path -LiteralPath $artifact) {
-        Remove-Item -LiteralPath $artifact -Force
-    }
-    Move-Item -LiteralPath $packages[0].FullName -Destination $artifact
-    Write-Host "Tizen WGT created: $artifact"
-} finally {
-    Remove-Item -LiteralPath $sourceDirectory -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $buildDirectory -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $packageDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# 1. Build Moonlight WebRTC Client (Main app)
+$moonlightRuntimeFiles = @(
+    'app.js',
+    'application-artwork.js',
+    'config.xml',
+    'durable-storage.js',
+    'frame-interpolation.js',
+    'gamepad-input.js',
+    'gamepad-ui-navigation.js',
+    'gateway-ipv4.js',
+    'gateway-store.js',
+    'index.html',
+    'preferences.js',
+    'tizen_web_project.yaml',
+    'ui.css',
+    'ui.js',
+    'wake-on-lan.js'
+)
+Build-TizenWidget -Name 'Moonlight WebRTC Client' -SourceDir (Join-Path $repositoryRoot 'tizen') -ArtifactName 'MoonlightWebRTC.wgt' -Files $moonlightRuntimeFiles -IncludeWasm
+
+# 2. Build Steam Big Picture (Shortcut launcher app)
+Build-TizenWidget -Name 'Steam Big Picture' -SourceDir (Join-Path $repositoryRoot 'tizen-steam') -ArtifactName 'SteamBigPicture.wgt'
