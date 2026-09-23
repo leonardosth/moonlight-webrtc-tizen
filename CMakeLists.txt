@@ -324,7 +324,7 @@ if(BUILD_TESTING)
     add_executable(management_ipc_protocol_test
         tests/ManagementIpcProtocolTest.cpp
     )
-    target_link_libraries(management_ipc_protocol_test PRIVATE management_ipc_protocol)
+    target_link_libraries(management_ipc_protocol_test PRIVATE management_ipc_protocol management_ipc_client)
     add_test(NAME management_ipc_protocol_test COMMAND management_ipc_protocol_test)
 
     add_executable(wake_on_lan_address_test

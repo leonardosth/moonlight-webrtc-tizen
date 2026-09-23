@@ -3,7 +3,9 @@
 #include "gateway/ManagementIpcProtocol.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <thread>
 
 namespace gateway::managementipc {
@@ -23,6 +25,8 @@ private:
     Logger logger_;
     std::atomic<bool> stopRequested_ = false;
     std::atomic<void*> activePipe_ = nullptr;
+    std::mutex mutex_;
+    std::condition_variable condition_;
     std::thread thread_;
 };
 } // namespace gateway::managementipc

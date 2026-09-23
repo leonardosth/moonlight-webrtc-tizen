@@ -180,6 +180,9 @@ void ServiceIpcServer::run()
             activePipe_.store(pipe.get(), std::memory_order_release);
             if (!connectPipe(pipe.get(), stopRequested_)) {
                 activePipe_.store(nullptr, std::memory_order_release);
+                if (!stopRequested_.load(std::memory_order_acquire)) {
+                    Sleep(100);
+                }
                 continue;
             }
 

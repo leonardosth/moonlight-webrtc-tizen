@@ -69,17 +69,55 @@ bool verifyTrayServer(HANDLE pipe, std::string& failure)
 ManagementIpcClient::ManagementIpcClient(Handler handler, Logger logger) : handler_(std::move(handler)), logger_(std::move(logger)) {}
 ManagementIpcClient::~ManagementIpcClient() { stop(); }
 void ManagementIpcClient::start() { if (!thread_.joinable()) { stopRequested_ = false; thread_ = std::thread([this] { run(); }); } }
-void ManagementIpcClient::stop() { stopRequested_ = true; if (auto pipe = static_cast<HANDLE>(activePipe_.load())) CancelIoEx(pipe, nullptr); if (thread_.joinable()) thread_.join(); }
+void ManagementIpcClient::stop()
+{
+    {
+        std::lock_guard lock(mutex_);
+        stopRequested_ = true;
+    }
+    condition_.notify_all();
+    if (auto pipe = static_cast<HANDLE>(activePipe_.load())) {
+        CancelIoEx(pipe, nullptr);
+    }
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
 
 void ManagementIpcClient::run()
 {
+    auto waitBackoff = [this](std::chrono::milliseconds duration) {
+        std::unique_lock lock(mutex_);
+        return condition_.wait_for(lock, duration, [this] { return stopRequested_.load(); });
+    };
+
     while (!stopRequested_) {
-        if (!WaitNamedPipeW(PipeName, 500)) continue;
+        if (!WaitNamedPipeW(PipeName, 500)) {
+            // When the tray is not running, WaitNamedPipeW returns FALSE immediately
+            // with ERROR_FILE_NOT_FOUND without waiting. We must wait before retrying
+            // to avoid pinning a CPU core at 100%.
+            if (waitBackoff(std::chrono::milliseconds(500))) {
+                break;
+            }
+            continue;
+        }
         Handle pipe(CreateFileW(PipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                                 SECURITY_SQOS_PRESENT | SECURITY_IMPERSONATION, nullptr));
-        if (pipe.get() == INVALID_HANDLE_VALUE) { logger_("Management IPC connect failed: " + win32Error(GetLastError())); continue; }
+        if (pipe.get() == INVALID_HANDLE_VALUE) {
+            logger_("Management IPC connect failed: " + win32Error(GetLastError()));
+            if (waitBackoff(std::chrono::milliseconds(500))) {
+                break;
+            }
+            continue;
+        }
         std::string verificationFailure;
-        if (!verifyTrayServer(pipe.get(), verificationFailure)) { logger_("Management IPC rejected tray endpoint: " + verificationFailure); continue; }
+        if (!verifyTrayServer(pipe.get(), verificationFailure)) {
+            logger_("Management IPC rejected tray endpoint: " + verificationFailure);
+            if (waitBackoff(std::chrono::milliseconds(1000))) {
+                break;
+            }
+            continue;
+        }
         logger_("Management IPC connected to verified tray endpoint");
         activePipe_ = pipe.get();
         std::string request;

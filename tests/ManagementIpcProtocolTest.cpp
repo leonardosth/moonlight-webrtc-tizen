@@ -1,7 +1,13 @@
+#include "gateway/ManagementIpcClient.h"
 #include "gateway/ManagementIpcProtocol.h"
 
+#include <windows.h>
+
+#include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 namespace { void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); } }
 
@@ -38,6 +44,33 @@ int main()
         try { (void)parseResult(R"({"version":1,"type":"result","command":"pair","ok":true,"code":"pairing-started","message":"x","pin":"12"})", CommandType::Pair); } catch (...) { invalidPinRejected = true; }
         require(invalidPinRejected, "invalid pairing response PIN was accepted");
         bool mismatch = false; try { (void)parseResult(makeResult(CommandType::Test, expected), CommandType::SetHost); } catch (...) { mismatch = true; } require(mismatch, "mismatched response accepted");
-        std::cout << "Management IPC protocol tests passed\n"; return 0;
+
+        // Verify ManagementIpcClient idle CPU behavior when tray pipe does not exist
+        {
+            FILETIME createTime{}, exitTime{}, kernelStart{}, userStart{};
+            GetProcessTimes(GetCurrentProcess(), &createTime, &exitTime, &kernelStart, &userStart);
+
+            ManagementIpcClient client(
+                [](const Command&) -> Result { return {true, "ok", ""}; },
+                [](const std::string&) {}
+            );
+            client.start();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            client.stop();
+
+            FILETIME kernelEnd{}, userEnd{};
+            GetProcessTimes(GetCurrentProcess(), &createTime, &exitTime, &kernelEnd, &userEnd);
+
+            auto to100Ns = [](const FILETIME& ft) -> std::uint64_t {
+                return (static_cast<std::uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+            };
+            const auto kernelCpu = to100Ns(kernelEnd) - to100Ns(kernelStart);
+            const auto userCpu = to100Ns(userEnd) - to100Ns(userStart);
+            const auto totalCpuMs = (kernelCpu + userCpu) / 10000;
+
+            require(totalCpuMs < 200, "ManagementIpcClient consumed excessive CPU while idle");
+        }
+
+        std::cout << "Management IPC protocol and client tests passed\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "Management IPC protocol test failed: " << error.what() << '\n'; return 1; }
 }
