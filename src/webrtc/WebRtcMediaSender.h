@@ -2,9 +2,12 @@
 
 #include "media/MediaSender.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string_view>
+#include <vector>
 
 namespace rtc {
 class RtpPacketizationConfig;
@@ -34,6 +37,8 @@ private:
     std::shared_ptr<rtc::Track> videoTrack_;
     std::shared_ptr<rtc::Track> audioTrack_;
     VideoCodec videoCodec_;
+    std::vector<std::uint8_t> av1Buffer_;
+    std::mutex av1Mutex_;
 };
 
 std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(

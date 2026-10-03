@@ -258,11 +258,27 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         return DR_NEED_IDR;
     }
 
-    const auto flattened = flattenDecodeUnit(decodeUnit);
-    if (!flattened) {
+    // Determine if AV1 Temporal Delimiter OBU (0x12, 0x00) should be prepended
+    std::span<const std::uint8_t> prefix;
+    constexpr std::uint8_t obuTemporalDelimiter[] = { 0x12, 0x00 };
+    if (settings_.codec == VideoCodec::AV1 && decodeUnit->bufferList && decodeUnit->bufferList->data) {
+        const auto* firstChunk = reinterpret_cast<const std::uint8_t*>(decodeUnit->bufferList->data);
+        const bool hasTemporalDelimiter = decodeUnit->bufferList->length >= 2
+            && firstChunk[0] == obuTemporalDelimiter[0]
+            && firstChunk[1] == obuTemporalDelimiter[1];
+        if (!hasTemporalDelimiter) {
+            prefix = std::span<const std::uint8_t>(obuTemporalDelimiter, sizeof(obuTemporalDelimiter));
+        }
+    }
+
+    auto lease = bufferPool_.flatten(decodeUnit, prefix);
+    if (!lease) {
         log("Invalid Moonlight video decode unit");
         return DR_NEED_IDR;
     }
+
+    const auto flattened = lease->data();
+    const float flattenMs = static_cast<float>(lease->duration().count()) / 1'000'000.0f;
 
     if (!firstVideoFrameLogged_.exchange(true, std::memory_order_acq_rel)) {
         std::ostringstream message;
@@ -272,13 +288,14 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 << (decodeUnit->colorspace == COLORSPACE_REC_2020 ? " (Rec.2020)" : "")
                 << ", frameType=" << decodeUnit->frameType
                 << ", RTP=" << decodeUnit->rtpTimestamp
-                << ", size=" << flattened->size();
-        if (!flattened->empty()) {
+                << ", size=" << flattened.size()
+                << ", flattenTime=" << std::fixed << std::setprecision(2) << flattenMs << "ms";
+        if (!flattened.empty()) {
             message << ", first bytes=";
-            const auto count = std::min<std::size_t>(flattened->size(), 12);
+            const auto count = std::min<std::size_t>(flattened.size(), 12);
             for (std::size_t i = 0; i < count; ++i) {
                 message << std::hex << std::setw(2) << std::setfill('0')
-                        << static_cast<int>((*flattened)[i]) << ' ';
+                        << static_cast<int>(flattened[i]) << ' ';
             }
         }
         log(message.str());
@@ -303,7 +320,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                     log("AV1 HDR: Profile 0 Main 10-bit 4:2:0 Rec.2020 verified");
                 }
             } else if (settings_.codec == VideoCodec::HEVC) {
-                if (const auto sps = parseHevcSps(*flattened)) {
+                if (const auto sps = parseHevcSps(flattened)) {
                     bitDepthLuma_.store(sps->bitDepthLuma, std::memory_order_release);
                     bitDepthChroma_.store(sps->bitDepthChroma, std::memory_order_release);
                     chromaFormatIdc_.store(sps->chromaFormatIdc, std::memory_order_release);
@@ -353,7 +370,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         }
     }
 
-    sender_.sendVideoAccessUnit(settings_.codec, *flattened, decodeUnit->rtpTimestamp);
+    sender_.sendVideoAccessUnit(settings_.codec, flattened, decodeUnit->rtpTimestamp);
 
     if (decodeUnit->frameType == FRAME_TYPE_IDR
         && waitingForMoonlightIdr_.exchange(false, std::memory_order_acq_rel)) {
@@ -361,8 +378,8 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     }
 
     const auto frames = videoFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
-    const auto bytes = videoBytes_.fetch_add(flattened->size(), std::memory_order_relaxed)
-        + flattened->size();
+    const auto bytes = videoBytes_.fetch_add(flattened.size(), std::memory_order_relaxed)
+        + flattened.size();
     const auto now = std::chrono::steady_clock::now();
     const auto nowPltUs = PltGetMicroseconds();
 
@@ -389,7 +406,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             decodeUnit->presentationTimeUs,
             decodeUnit->receiveTimeUs,
             decodeUnit->enqueueTimeUs,
-            flattened->size(),
+            flattened.size(),
             decodeUnit->hdrActive,
             static_cast<int>(decodeUnit->colorspace),
             main10Verified_.load(std::memory_order_acquire),
@@ -403,6 +420,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 ? std::optional<int>(chromaFormatIdc_.load(std::memory_order_acquire))
                 : std::nullopt,
             decodeUnit->frameHostProcessingLatency,
+            flattenMs,
         };
 
         double intervalMs = 0.0;
@@ -423,6 +441,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             windowHostLatencySumMs_ += hostLatencyMs;
         }
         windowGatewayLatencySumMs_ += gatewayLatencyMs;
+        windowFlattenTimeSumMs_ += flattenMs;
 
         const auto windowElapsed = std::chrono::duration<double>(now - windowStartTime_).count();
         if (windowElapsed >= 0.5) {
@@ -448,6 +467,9 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             const float avgGatewayLatency = windowFrameCount_ > 0
                 ? static_cast<float>(windowGatewayLatencySumMs_ / windowFrameCount_)
                 : gatewayLatencyMs;
+            const float avgFlattenTime = windowFrameCount_ > 0
+                ? static_cast<float>(windowFlattenTimeSumMs_ / windowFrameCount_)
+                : flattenMs;
 
             const std::string colorName = decodeUnit->colorspace == COLORSPACE_REC_2020
                 ? "Rec.2020"
@@ -473,6 +495,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 jitterMs,
                 avgHostLatency,
                 avgGatewayLatency,
+                avgFlattenTime,
                 avgHostLatency + avgGatewayLatency,
                 frames,
                 bytes
@@ -484,6 +507,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             windowIntervalSqSumMs_ = 0.0;
             windowHostLatencySumMs_ = 0.0;
             windowGatewayLatencySumMs_ = 0.0;
+            windowFlattenTimeSumMs_ = 0.0;
         }
 
         if (now >= nextVideoLog_) {
@@ -575,26 +599,10 @@ void MoonlightMediaBridge::submitAudio(char* sampleData, int sampleLength)
 std::optional<std::vector<std::uint8_t>> MoonlightMediaBridge::flattenDecodeUnit(
     PDECODE_UNIT decodeUnit)
 {
-    if (!decodeUnit || !decodeUnit->bufferList || decodeUnit->fullLength <= 0) {
-        return std::nullopt;
+    if (auto lease = bufferPool_.flatten(decodeUnit)) {
+        return std::vector<std::uint8_t>(lease->data().begin(), lease->data().end());
     }
-
-    std::vector<std::uint8_t> flattened;
-    flattened.reserve(static_cast<std::size_t>(decodeUnit->fullLength));
-
-    for (auto* entry = decodeUnit->bufferList; entry; entry = entry->next) {
-        if (!entry->data || entry->length <= 0) {
-            return std::nullopt;
-        }
-        const auto* begin = reinterpret_cast<const std::uint8_t*>(entry->data);
-        flattened.insert(flattened.end(), begin, begin + entry->length);
-    }
-
-    if (flattened.size() != static_cast<std::size_t>(decodeUnit->fullLength)) {
-        return std::nullopt;
-    }
-
-    return flattened;
+    return std::nullopt;
 }
 
 void MoonlightMediaBridge::failHdrValidation(const std::string& message)

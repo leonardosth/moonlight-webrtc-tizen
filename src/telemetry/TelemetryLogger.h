@@ -30,6 +30,7 @@ struct SessionParameters {
     bool gameMode = true;
     bool rtpPlayoutDelay = false;
     bool rvfc = true;
+    bool bufferPool = true;
     std::string clientIp;
 };
 
@@ -61,6 +62,7 @@ struct HostTelemetrySample {
     float hostProcessingLatencyMs = 0.0f;
     float gatewayLatencyMs = 0.0f;
     float totalHostLatencyMs = 0.0f;
+    float flattenTimeMs = 0.0f;
     std::uint64_t totalFrames = 0;
 };
 
@@ -107,6 +109,7 @@ private:
         std::vector<double> decodeTimeSamples;
         std::vector<double> hostLatencySamples;
         std::vector<double> gatewayLatencySamples;
+        std::vector<double> flattenTimeSamples;
         std::vector<double> hostProcessingSamples;
         std::vector<double> rttSamples;
         std::vector<double> clientFpsSamples;

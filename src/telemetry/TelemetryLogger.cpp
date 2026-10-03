@@ -213,6 +213,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - Samsung Game Mode:    " << (params.gameMode ? "Enabled" : "Disabled") << "\n"
        << "  - RTP Playout Delay:    " << (params.rtpPlayoutDelay ? "Negotiated & Active" : "Disabled") << "\n"
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
+       << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 2MB)" : "Disabled") << "\n"
        << "================================================================================\n";
 
     writeLocked(ss.str());
@@ -249,6 +250,9 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
             if (hostSample->gatewayLatencyMs >= 0.0f && hostSample->gatewayLatencyMs < 500.0f) {
                 activeSession_->gatewayLatencySamples.push_back(hostSample->gatewayLatencyMs);
             }
+            if (hostSample->flattenTimeMs > 0.0f) {
+                activeSession_->flattenTimeSamples.push_back(hostSample->flattenTimeMs);
+            }
             if (hostSample->totalHostLatencyMs > 0.0f) {
                 activeSession_->hostLatencySamples.push_back(hostSample->totalHostLatencyMs);
             }
@@ -264,7 +268,8 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
     if (hostSample) {
         ss << "Host: " << std::fixed << std::setprecision(1) << hostSample->hostFps << " FPS "
            << "(enc: " << hostSample->hostProcessingLatencyMs << "ms, gw: "
-           << hostSample->gatewayLatencyMs << "ms) | ";
+           << hostSample->gatewayLatencyMs << "ms, flat: "
+           << hostSample->flattenTimeMs << "ms) | ";
     }
 
     ss << "TV: " << std::fixed << std::setprecision(1) << clientSample.decodedFps << " FPS "
@@ -298,6 +303,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     auto decodeDist = computeDistribution(activeSession_->decodeTimeSamples);
     auto hostLatencyDist = computeDistribution(activeSession_->hostLatencySamples);
     auto gwLatencyDist = computeDistribution(activeSession_->gatewayLatencySamples);
+    auto flattenDist = computeDistribution(activeSession_->flattenTimeSamples);
     auto hostProcDist = computeDistribution(activeSession_->hostProcessingSamples);
     auto rttDist = computeDistribution(activeSession_->rttSamples);
     auto clientFpsDist = computeDistribution(activeSession_->clientFpsSamples);
@@ -333,6 +339,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << formatDistributionLine("Host Latency (Total)", hostLatencyDist, "ms")
        << formatDistributionLine("Host Processing (Enc)", hostProcDist, "ms")
        << formatDistributionLine("Gateway Processing", gwLatencyDist, "ms")
+       << formatDistributionLine("Gateway Flatten Time", flattenDist, "ms")
        << formatDistributionLine("Network RTT", rttDist, "ms")
        << formatDistributionLine("Video RTP Jitter", videoJitterDist, "ms")
        << formatDistributionLine("TV Decoded FPS", clientFpsDist, " fps")

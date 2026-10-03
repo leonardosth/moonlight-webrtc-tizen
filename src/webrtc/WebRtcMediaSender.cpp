@@ -40,17 +40,17 @@ void WebRtcMediaSender::sendVideoAccessUnit(VideoCodec codec,
                                    accessUnit.size(),
                                    rtc::FrameInfo(rtpTimestamp));
         } else {
-            // Prepend the Temporal Delimiter OBU to form a standard Temporal Unit.
-            std::vector<rtc::byte> temporalUnit;
-            temporalUnit.reserve(sizeof(obuTemporalDelimiter) + accessUnit.size());
-            temporalUnit.insert(temporalUnit.end(),
-                                reinterpret_cast<const rtc::byte*>(obuTemporalDelimiter),
-                                reinterpret_cast<const rtc::byte*>(obuTemporalDelimiter + sizeof(obuTemporalDelimiter)));
-            temporalUnit.insert(temporalUnit.end(),
-                                reinterpret_cast<const rtc::byte*>(accessUnit.data()),
-                                reinterpret_cast<const rtc::byte*>(accessUnit.data() + accessUnit.size()));
-            videoTrack_->sendFrame(temporalUnit.data(),
-                                   temporalUnit.size(),
+            // Prepend the Temporal Delimiter OBU into reusable buffer to avoid allocations.
+            const std::lock_guard lock(av1Mutex_);
+            const std::size_t total = sizeof(obuTemporalDelimiter) + accessUnit.size();
+            if (av1Buffer_.capacity() < total) {
+                av1Buffer_.reserve(total);
+            }
+            av1Buffer_.resize(total);
+            std::memcpy(av1Buffer_.data(), obuTemporalDelimiter, sizeof(obuTemporalDelimiter));
+            std::memcpy(av1Buffer_.data() + sizeof(obuTemporalDelimiter), accessUnit.data(), accessUnit.size());
+            videoTrack_->sendFrame(reinterpret_cast<const rtc::byte*>(av1Buffer_.data()),
+                                   av1Buffer_.size(),
                                    rtc::FrameInfo(rtpTimestamp));
         }
         return;

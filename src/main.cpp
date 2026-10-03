@@ -931,6 +931,7 @@ private:
             params.gameMode = true;
             params.rtpPlayoutDelay = false;
             params.rvfc = true;
+            params.bufferPool = true;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 
@@ -1687,6 +1688,7 @@ private:
                     sample.hostFrameJitterMs = diag->hostFrameJitterMs;
                     sample.hostProcessingLatencyMs = diag->hostProcessingLatencyMs;
                     sample.gatewayLatencyMs = diag->gatewayLatencyMs;
+                    sample.flattenTimeMs = diag->flattenTimeMs;
                     sample.totalHostLatencyMs = diag->totalHostLatencyMs;
                     sample.totalFrames = diag->totalFrames;
                     hostSample = sample;
