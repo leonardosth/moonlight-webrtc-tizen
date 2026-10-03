@@ -214,6 +214,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - RTP Playout Delay:    " << (params.rtpPlayoutDelay ? "Negotiated & Active" : "Disabled") << "\n"
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 2MB)" : "Disabled") << "\n"
+       << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
        << "================================================================================\n";
 
     writeLocked(ss.str());
@@ -275,7 +276,11 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         ss << "Host: " << std::fixed << std::setprecision(1) << hostSample->hostFps << " FPS "
            << "(enc: " << hostSample->hostProcessingLatencyMs << "ms, gw: "
            << hostSample->gatewayLatencyMs << "ms, flat: "
-           << hostSample->flattenTimeMs << "ms) | ";
+           << hostSample->flattenTimeMs << "ms";
+        if (hostSample->gatewayLateFrameDrops > 0) {
+            ss << ", dropGw: " << hostSample->gatewayLateFrameDrops;
+        }
+        ss << ") | ";
     }
 
     ss << "TV: " << std::fixed << std::setprecision(1) << clientSample.decodedFps << " FPS "
@@ -323,6 +328,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
 
     const auto& lastClient = activeSession_->lastClientSample;
     const auto totalFramesSent = activeSession_->lastHostSample ? activeSession_->lastHostSample->totalFrames : 0;
+    const auto totalLateDrops = activeSession_->lastHostSample ? activeSession_->lastHostSample->gatewayLateFrameDrops : 0;
     const auto totalFramesDecoded = lastClient.framesDecoded;
     const auto totalFramesDropped = lastClient.framesDropped;
     const auto totalPacketsLost = lastClient.packetsLost;
@@ -344,6 +350,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << "  TV Frames Decoded:      " << totalFramesDecoded << "\n"
        << "  TV Frames Dropped:      " << totalFramesDropped << " ("
        << std::fixed << std::setprecision(2) << dropRate << "% drop rate)\n"
+       << "  Gateway Late Drops:     " << totalLateDrops << "\n"
        << "  Packets Lost (RTP):     " << totalPacketsLost << "\n\n"
        << "Performance Metrics Distribution:\n"
        << formatDistributionLine("TV Decode Time", decodeDist, "ms");

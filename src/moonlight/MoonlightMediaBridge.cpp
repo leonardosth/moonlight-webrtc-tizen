@@ -85,6 +85,16 @@ MoonlightStreamDiagnostics MoonlightMediaBridge::currentStreamDiagnostics() cons
     return currentStreamDiagnostics_;
 }
 
+std::uint64_t MoonlightMediaBridge::lateFrameDrops() const noexcept
+{
+    return lateFrameDrops_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t MoonlightMediaBridge::frameDeadlineUs() const noexcept
+{
+    return frameDeadlineUs_.load(std::memory_order_relaxed);
+}
+
 int MoonlightMediaBridge::videoSetupCallback(int videoFormat,
                                               int width,
                                               int height,
@@ -247,6 +257,19 @@ int MoonlightMediaBridge::setupVideo(int videoFormat,
         chromaFormatIdc_.store(1, std::memory_order_release);
     }
 
+    const auto frameIntervalUs = settings_.fps > 0 ? (1'000'000.0f / static_cast<float>(settings_.fps)) : 16667.0f;
+    switch (settings_.latencyMode) {
+    case LatencyMode::LowestLatency:
+        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 1.5f), std::memory_order_release);
+        break;
+    case LatencyMode::Balanced:
+        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 3.0f), std::memory_order_release);
+        break;
+    case LatencyMode::Smoothest:
+        frameDeadlineUs_.store(0, std::memory_order_release);
+        break;
+    }
+
     videoConfigured_.store(true, std::memory_order_release);
     return 0;
 }
@@ -256,6 +279,26 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     if (!videoConfigured_.load(std::memory_order_acquire)
         || !videoStarted_.load(std::memory_order_acquire) || !decodeUnit) {
         return DR_NEED_IDR;
+    }
+
+    const auto nowPltUs = PltGetMicroseconds();
+    const auto deadlineUs = frameDeadlineUs_.load(std::memory_order_relaxed);
+    if (deadlineUs > 0 && decodeUnit->receiveTimeUs > 0
+        && nowPltUs > decodeUnit->receiveTimeUs
+        && decodeUnit->frameType != FRAME_TYPE_IDR) {
+        const auto frameAgeUs = nowPltUs - decodeUnit->receiveTimeUs;
+        if (frameAgeUs > deadlineUs) {
+            lateFrameDrops_.fetch_add(1, std::memory_order_relaxed);
+            if (!waitingForMoonlightIdr_.exchange(true, std::memory_order_acq_rel)) {
+                std::ostringstream dropMsg;
+                dropMsg << "Late video frame dropped by deadline policy: age="
+                        << (frameAgeUs / 1000) << "ms > deadline=" << (deadlineUs / 1000)
+                        << "ms, requesting IDR refresh";
+                log(dropMsg.str());
+                return DR_NEED_IDR;
+            }
+            return DR_OK;
+        }
     }
 
     // Determine if AV1 Temporal Delimiter OBU (0x12, 0x00) should be prepended
@@ -381,15 +424,15 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     const auto bytes = videoBytes_.fetch_add(flattened.size(), std::memory_order_relaxed)
         + flattened.size();
     const auto now = std::chrono::steady_clock::now();
-    const auto nowPltUs = PltGetMicroseconds();
+    const auto currentPltUs = PltGetMicroseconds();
 
     const float hostLatencyMs = decodeUnit->frameHostProcessingLatency > 0
         ? static_cast<float>(decodeUnit->frameHostProcessingLatency) * 0.1f
         : 0.0f;
 
     float gatewayLatencyMs = 0.0f;
-    if (decodeUnit->receiveTimeUs > 0 && nowPltUs >= decodeUnit->receiveTimeUs) {
-        gatewayLatencyMs = static_cast<float>(nowPltUs - decodeUnit->receiveTimeUs) / 1000.0f;
+    if (decodeUnit->receiveTimeUs > 0 && currentPltUs >= decodeUnit->receiveTimeUs) {
+        gatewayLatencyMs = static_cast<float>(currentPltUs - decodeUnit->receiveTimeUs) / 1000.0f;
         // Gateway transit and queue delay is normally 0.5ms - 10ms. Clamp anomalies (>500ms).
         if (gatewayLatencyMs > 500.0f) {
             gatewayLatencyMs = 0.0f;
@@ -498,7 +541,8 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 avgFlattenTime,
                 avgHostLatency + avgGatewayLatency,
                 frames,
-                bytes
+                bytes,
+                lateFrameDrops_.load(std::memory_order_relaxed)
             };
 
             windowStartTime_ = now;

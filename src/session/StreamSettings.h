@@ -27,6 +27,39 @@ struct VideoMode {
     bool supportsHdr;
 };
 
+enum class LatencyMode {
+    LowestLatency,
+    Balanced,
+    Smoothest,
+};
+
+inline constexpr std::string_view latencyModeName(LatencyMode mode) noexcept
+{
+    switch (mode) {
+    case LatencyMode::LowestLatency:
+        return "lowest_latency";
+    case LatencyMode::Balanced:
+        return "balanced";
+    case LatencyMode::Smoothest:
+        return "smoothest";
+    }
+    return "balanced";
+}
+
+inline constexpr std::optional<LatencyMode> parseLatencyMode(std::string_view text) noexcept
+{
+    if (text == "lowest_latency") {
+        return LatencyMode::LowestLatency;
+    }
+    if (text == "balanced") {
+        return LatencyMode::Balanced;
+    }
+    if (text == "smoothest") {
+        return LatencyMode::Smoothest;
+    }
+    return std::nullopt;
+}
+
 struct StreamSettings {
     int width = 1280;
     int height = 720;
@@ -34,6 +67,7 @@ struct StreamSettings {
     int bitrateKbps = 12000;
     VideoCodec codec = VideoCodec::H264;
     bool hdr = false;
+    LatencyMode latencyMode = LatencyMode::Balanced;
     int audioChannels = 2;
 
     bool operator==(const StreamSettings&) const = default;

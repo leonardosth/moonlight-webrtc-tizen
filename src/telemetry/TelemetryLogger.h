@@ -26,11 +26,13 @@ struct SessionParameters {
     int bitrateKbps = 0;
     bool hdr = false;
     int audioChannels = 2;
-    std::string latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
+    std::string latencyMode = "Balanced";
     bool gameMode = true;
     bool rtpPlayoutDelay = false;
     bool rvfc = true;
     bool bufferPool = true;
+    bool frameDropPolicy = true;
+    std::uint64_t frameDeadlineUs = 0;
     std::string clientIp;
 };
 
@@ -67,6 +69,7 @@ struct HostTelemetrySample {
     float totalHostLatencyMs = 0.0f;
     float flattenTimeMs = 0.0f;
     std::uint64_t totalFrames = 0;
+    std::uint64_t gatewayLateFrameDrops = 0;
 };
 
 struct MetricDistribution {

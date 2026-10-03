@@ -931,7 +931,24 @@ private:
             params.bitrateKbps = session->settings.bitrateKbps;
             params.hdr = session->settings.hdr;
             params.audioChannels = session->settings.audioChannels;
-            params.latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
+            const auto frameIntervalUs = session->settings.fps > 0
+                ? (1'000'000.0f / static_cast<float>(session->settings.fps))
+                : 16667.0f;
+            switch (session->settings.latencyMode) {
+            case gateway::LatencyMode::LowestLatency:
+                params.latencyMode = "Prefer Lowest Latency (1.5x deadline drop)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 1.5f);
+                break;
+            case gateway::LatencyMode::Balanced:
+                params.latencyMode = "Balanced (3.0x deadline drop)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 3.0f);
+                break;
+            case gateway::LatencyMode::Smoothest:
+                params.latencyMode = "Prefer Smoothest Video (drop disabled)";
+                params.frameDeadlineUs = 0;
+                break;
+            }
+            params.frameDropPolicy = params.frameDeadlineUs > 0;
             params.gameMode = true;
             params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             params.rvfc = true;
@@ -1704,6 +1721,7 @@ private:
                     sample.flattenTimeMs = diag->flattenTimeMs;
                     sample.totalHostLatencyMs = diag->totalHostLatencyMs;
                     sample.totalFrames = diag->totalFrames;
+                    sample.gatewayLateFrameDrops = diag->lateFrameDrops;
                     hostSample = sample;
                 }
             }

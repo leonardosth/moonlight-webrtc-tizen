@@ -270,6 +270,48 @@ int main()
                     == settingsHdrAv1_1080,
                 "AV1 HDR 1080p start-session parsing failed");
 
+        const auto lowestLatencyMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"latencyMode", "lowest_latency"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedLowestLatency = gateway::protocol::parseClientMessage(lowestLatencyMsg);
+        const auto& startLowest = std::get<gateway::protocol::StartSessionRequest>(parsedLowestLatency.payload);
+        require(startLowest.settings.latencyMode == gateway::LatencyMode::LowestLatency,
+                "lowest_latency latencyMode parsing failed");
+
+        const auto smoothestMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"latencyMode", "smoothest"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedSmoothest = gateway::protocol::parseClientMessage(smoothestMsg);
+        const auto& startSmoothest = std::get<gateway::protocol::StartSessionRequest>(parsedSmoothest.payload);
+        require(startSmoothest.settings.latencyMode == gateway::LatencyMode::Smoothest,
+                "smoothest latencyMode parsing failed");
+
+        const auto sessionStatus = gateway::protocol::makeSessionStatus("active", 1, startLowest.settings);
+        require(sessionStatus["video"]["latencyMode"] == "lowest_latency",
+                "sessionStatus latencyMode serialization failed");
+
         requireProtocolError(
             [] {
                 gateway::protocol::parseClientMessage(

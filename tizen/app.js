@@ -46,6 +46,8 @@ const bitrateSelect = document.getElementById("bitrate-select");
 const interpolationSelect = document.getElementById("interpolation-select");
 const interpolationStatusElement = document.getElementById("interpolation-status");
 const interpolationCanvas = document.getElementById("interpolation-canvas");
+const latencyModeSelect = document.getElementById("latency-mode-select");
+const latencyModeStatusElement = document.getElementById("latency-mode-status");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -890,6 +892,7 @@ function currentPreferenceValues() {
     bitrateKbps: Number.isInteger(Number(bitrateSelect.value))
       ? Number(bitrateSelect.value) : null,
     frameInterpolation: interpolationSelect.value === "true",
+    latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
   };
 }
 
@@ -1364,6 +1367,7 @@ function handleSessionStatus(message) {
             codec: fallbackCodec,
             bitrateKbps: selectedSession.bitrateKbps,
             hdr: selectedSession.hdr,
+            latencyMode: selectedSession.latencyMode,
           },
           audio: { channels: 2 },
         });
@@ -1445,6 +1449,7 @@ function selectedSettings() {
     codec: codecSelect.value,
     bitrateKbps: Number(bitrateSelect.value),
     hdr: hdrSelect.value === "true",
+    latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
   };
 }
 
@@ -1471,6 +1476,7 @@ function startSelectedSession() {
         codec: selectedSession.codec,
         bitrateKbps: selectedSession.bitrateKbps,
         hdr: selectedSession.hdr,
+        latencyMode: selectedSession.latencyMode,
       },
       audio: { channels: 2 },
     });
@@ -1809,6 +1815,20 @@ function updateInterpolationStatus() {
   overlay.interpolation.textContent = measured
     ? String(status.sourceFps) + " → " + String(status.outputFps)
     : label;
+}
+
+const LATENCY_MODE_DESCRIPTIONS = {
+  lowest_latency: "Aggressive drop of late frames (>1.5× interval). Minimizes latency, but may drop frames on jittery networks.",
+  balanced: "Standard balance (up to 3× interval). Absorbs minor network jitter while keeping latency low and video smooth.",
+  smoothest: "No frame drops at gateway. Maximizes video smoothness and zero micro-stutter at the expense of temporary latency buildup.",
+};
+
+function updateLatencyModeStatus() {
+  if (!latencyModeSelect || !latencyModeStatusElement) {
+    return;
+  }
+  const mode = latencyModeSelect.value;
+  latencyModeStatusElement.textContent = LATENCY_MODE_DESCRIPTIONS[mode] || LATENCY_MODE_DESCRIPTIONS.balanced;
 }
 
 function updateTrackCounts() {
@@ -2523,6 +2543,7 @@ function applicationSessionRequest(type, applicationId) {
       codec: settings.codec,
       bitrateKbps: settings.bitrateKbps,
       hdr: settings.hdr,
+      latencyMode: settings.latencyMode,
     },
     audio: { channels: 2 },
   };
@@ -3150,6 +3171,12 @@ interpolationSelect.addEventListener("change", function () {
   persistCurrentPreferences();
   applyFrameInterpolation();
 });
+if (latencyModeSelect) {
+  latencyModeSelect.addEventListener("change", function () {
+    updateLatencyModeStatus();
+    persistCurrentPreferences();
+  });
+}
 
 function updateRemoteTracksForVisibility() {
   const enabled = !document.hidden;
@@ -4076,8 +4103,12 @@ detectWebRtcAv1Support();
 // preference set, and a select still holding its markup default would write that default
 // back over the saved value.
 interpolationSelect.value = savedPreferences.frameInterpolation ? "true" : "false";
+if (latencyModeSelect && savedPreferences && savedPreferences.latencyMode) {
+  latencyModeSelect.value = savedPreferences.latencyMode;
+}
 restoreCachedCapabilities();
 updateInterpolationStatus();
+updateLatencyModeStatus();
 renderGateways();
 probeSavedGateways();
 
