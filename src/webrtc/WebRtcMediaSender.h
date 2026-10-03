@@ -21,6 +21,10 @@ inline constexpr std::string_view WebRtcColorSpaceExtensionUri =
     "http://www.webrtc.org/experiments/rtp-hdrext/color-space";
 inline constexpr int PreferredWebRtcColorSpaceExtensionId = 9;
 
+inline constexpr std::string_view WebRtcPlayoutDelayExtensionUri =
+    "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay";
+inline constexpr int PreferredWebRtcPlayoutDelayExtensionId = 10;
+
 class WebRtcMediaSender final : public MediaSender {
 public:
     WebRtcMediaSender(std::shared_ptr<rtc::Track> videoTrack,
@@ -48,6 +52,13 @@ void configureHdrRtpColorSpace(
     const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration,
     int negotiatedExtensionId);
 void disableRtpColorSpace(
+    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration);
+void configurePlayoutDelayRtp(
+    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration,
+    int negotiatedExtensionId,
+    std::uint16_t minDelay10ms = 0,
+    std::uint16_t maxDelay10ms = 0);
+void disablePlayoutDelayRtp(
     const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration);
 
 } // namespace gateway

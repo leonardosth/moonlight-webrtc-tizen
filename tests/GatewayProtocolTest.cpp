@@ -543,6 +543,16 @@ int main()
                     colorSpaceSdp, "urn:example:not-negotiated"),
                 "Unrelated video extmap was accepted");
 
+        const std::string playoutDelaySdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=extmap:10 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        require(gateway::videoExtensionId(
+                    playoutDelaySdp,
+                    "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")
+                    == 10,
+                "Video playout-delay extmap was not parsed");
+
         const auto capabilities = gateway::protocol::makeCapabilities();
         require(capabilities.at("resolutions").size() == 4
                     && capabilities.at("videoModes").size() == 12

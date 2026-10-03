@@ -331,6 +331,7 @@ struct Session {
     std::string clientAddress;
     std::optional<std::string> wakeOnLanMacAddress;
     bool streamingActive = false;
+    bool rtpPlayoutDelayNegotiated = false;
 
     std::mutex sendMutex;
     std::mutex candidateMutex;
@@ -733,6 +734,9 @@ private:
                 gateway::PreferredWebRtcColorSpaceExtensionId,
                 std::string(gateway::WebRtcColorSpaceExtensionUri)));
         }
+        video.addExtMap(rtc::Description::Entry::ExtMap(
+            gateway::PreferredWebRtcPlayoutDelayExtensionId,
+            std::string(gateway::WebRtcPlayoutDelayExtensionUri)));
         video.addSSRC(VideoSsrc, RtpCname, VideoMediaStreamId, "video");
 
         session->videoTrack = peerConnection->addTrack(video);
@@ -929,7 +933,7 @@ private:
             params.audioChannels = session->settings.audioChannels;
             params.latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
             params.gameMode = true;
-            params.rtpPlayoutDelay = false;
+            params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             params.rvfc = true;
             params.bufferPool = true;
             params.clientIp = session->clientAddress;
@@ -2151,6 +2155,22 @@ private:
         } else {
             gateway::disableRtpColorSpace(session->videoRtpConfiguration);
         }
+
+        const auto playoutDelayId = gateway::videoExtensionId(
+            sdp, gateway::WebRtcPlayoutDelayExtensionUri);
+        if (playoutDelayId) {
+            session->rtpPlayoutDelayNegotiated = true;
+            gateway::configurePlayoutDelayRtp(
+                session->videoRtpConfiguration, *playoutDelayId, 0, 0);
+            log("WebRTC RTP playout-delay extension: NEGOTIATED & ACTIVE, id="
+                + std::to_string(*playoutDelayId)
+                + " (min=0ms, max=0ms)");
+        } else {
+            session->rtpPlayoutDelayNegotiated = false;
+            gateway::disablePlayoutDelayRtp(session->videoRtpConfiguration);
+            log("WebRTC RTP playout-delay extension: NOT NEGOTIATED by client");
+        }
+
         peerConnection->setRemoteDescription(rtc::Description(sdp, "answer"));
 
         std::vector<PendingCandidate> pendingCandidates;

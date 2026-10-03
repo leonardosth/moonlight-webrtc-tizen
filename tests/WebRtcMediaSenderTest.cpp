@@ -73,6 +73,17 @@ int main()
         require(hevcConfiguration->colorSpaceId == 0,
                 "RTP color-space extension was not disabled");
 
+        require(hevcConfiguration->playoutDelayId == 0,
+                "RTP playout-delay extension was enabled before negotiation");
+        gateway::configurePlayoutDelayRtp(hevcConfiguration, 10, 0, 0);
+        require(hevcConfiguration->playoutDelayId == 10
+                    && hevcConfiguration->playoutDelayMin == 0
+                    && hevcConfiguration->playoutDelayMax == 0,
+                "Negotiated RTP playout-delay values are incorrect");
+        gateway::disablePlayoutDelayRtp(hevcConfiguration);
+        require(hevcConfiguration->playoutDelayId == 0,
+                "RTP playout-delay extension was not disabled");
+
         rtc::Description::Video h264Description(
             "video", rtc::Description::Direction::SendOnly);
         h264Description.addH264Codec(96);
@@ -86,12 +97,18 @@ int main()
         hevcDescription.addExtMap(rtc::Description::Entry::ExtMap(
             gateway::PreferredWebRtcColorSpaceExtensionId,
             std::string(gateway::WebRtcColorSpaceExtensionUri)));
+        hevcDescription.addExtMap(rtc::Description::Entry::ExtMap(
+            gateway::PreferredWebRtcPlayoutDelayExtensionId,
+            std::string(gateway::WebRtcPlayoutDelayExtensionUri)));
         const std::string hevcSdp = hevcDescription.generateSdp();
         require(hevcSdp.find("a=rtpmap:96 H265/90000") != std::string::npos
                     && hevcSdp.find("a=fmtp:96") == std::string::npos
                     && hevcSdp.find("H264/90000") == std::string::npos
                     && hevcSdp.find(
                            "a=extmap:9 http://www.webrtc.org/experiments/rtp-hdrext/color-space")
+                        != std::string::npos
+                    && hevcSdp.find(
+                           "a=extmap:10 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")
                         != std::string::npos,
                 "libdatachannel HEVC SDP description is incorrect");
 

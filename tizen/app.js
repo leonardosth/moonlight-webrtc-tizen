@@ -1657,6 +1657,9 @@ async function handleOffer(message) {
     }
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
+    if (peerConnection.localDescription && peerConnection.localDescription.sdp.includes("http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")) {
+      log("WebRTC RTP playout-delay extension negotiated in answer");
+    }
     sendGatewayMessage({
       type: "answer",
       sessionId: message.sessionId,

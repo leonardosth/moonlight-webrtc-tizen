@@ -11,7 +11,7 @@
 [Setup]
 AppId={{89ABF3E2-D0A7-49C1-8D7C-65B2E9CCCD28}
 AppName=Moonlight WebRTC
-AppVersion=1.2.0-dev
+AppVersion=1.3.0-dev
 AppPublisher=Moonlight WebRTC
 DefaultDirName={autopf}\Moonlight WebRTC
 DefaultGroupName=Moonlight WebRTC
@@ -20,8 +20,8 @@ OutputDir={#OutputDir}
 OutputBaseFilename=MoonlightWebRTC-Setup
 SetupIconFile={#SourceRoot}\src\tray\resources\moonlight.ico
 UninstallDisplayIcon={app}\moonlight_webrtc_tray.exe
-VersionInfoVersion=1.2.0.0
-VersionInfoProductVersion=1.2.0
+VersionInfoVersion=1.3.0.0
+VersionInfoProductVersion=1.3.0
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
