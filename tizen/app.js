@@ -225,6 +225,9 @@ let rvfcHandle = null;
 let rvfcRenderedFrames = 0;
 let rvfcLastTime = 0;
 let rvfcIntervals = [];
+let rvfcLastMetadata = null;
+let rvfcProcessingDurations = [];
+let rvfcPresentationDelays = [];
 
 function startVideoFrameCallback() {
   if (!videoElement || typeof videoElement.requestVideoFrameCallback !== "function") {
@@ -233,8 +236,30 @@ function startVideoFrameCallback() {
   if (rvfcHandle !== null) {
     return;
   }
-  function onFrame(now) {
+  function onFrame(now, metadata) {
     rvfcRenderedFrames++;
+    if (metadata && typeof metadata === "object") {
+      rvfcLastMetadata = metadata;
+      if (typeof metadata.processingDuration === "number" && metadata.processingDuration > 0) {
+        // processingDuration is in seconds; convert to milliseconds
+        const procMs = metadata.processingDuration * 1000;
+        if (procMs > 0 && procMs < 500) {
+          rvfcProcessingDurations.push(procMs);
+          if (rvfcProcessingDurations.length > 30) {
+            rvfcProcessingDurations.shift();
+          }
+        }
+      }
+      if (typeof metadata.expectedDisplayTime === "number" && metadata.expectedDisplayTime >= now) {
+        const delayMs = metadata.expectedDisplayTime - now;
+        if (delayMs >= 0 && delayMs < 500) {
+          rvfcPresentationDelays.push(delayMs);
+          if (rvfcPresentationDelays.length > 30) {
+            rvfcPresentationDelays.shift();
+          }
+        }
+      }
+    }
     if (rvfcLastTime > 0) {
       const delta = now - rvfcLastTime;
       if (delta > 0 && delta < 500) {
@@ -261,6 +286,9 @@ function stopVideoFrameCallback() {
   rvfcHandle = null;
   rvfcLastTime = 0;
   rvfcIntervals = [];
+  rvfcLastMetadata = null;
+  rvfcProcessingDurations = [];
+  rvfcPresentationDelays = [];
 }
 
 let hostDiagnosticsFirstReceived = false;
@@ -3884,6 +3912,20 @@ async function updateStatistics() {
         }
       }
 
+      let rvfcProcessingMs = 0;
+      if (rvfcProcessingDurations.length > 0) {
+        const sum = rvfcProcessingDurations.reduce(function (a, b) { return a + b; }, 0);
+        rvfcProcessingMs = sum / rvfcProcessingDurations.length;
+      }
+      let rvfcExpectedDelayMs = 0;
+      if (rvfcPresentationDelays.length > 0) {
+        const sum = rvfcPresentationDelays.reduce(function (a, b) { return a + b; }, 0);
+        rvfcExpectedDelayMs = sum / rvfcPresentationDelays.length;
+      }
+      const rvfcPresented = (rvfcLastMetadata && typeof rvfcLastMetadata.presentedFrames === "number")
+        ? rvfcLastMetadata.presentedFrames
+        : rvfcRenderedFrames;
+
       if (sampleTime - lastStatisticsConsoleTime >= 5000) {
         lastStatisticsConsoleTime = sampleTime;
         console.log("Stream diagnostics: " + JSON.stringify({
@@ -3907,6 +3949,9 @@ async function updateStatistics() {
           packetsReceived: statisticValue(inboundVideo, "packetsReceived"),
           packetsLost: statisticValue(inboundVideo, "packetsLost"),
           bytesReceived: bytesReceived,
+          rvfcProcessingMs: rvfcProcessingMs > 0 ? Number(rvfcProcessingMs.toFixed(2)) : null,
+          rvfcExpectedDelayMs: rvfcExpectedDelayMs > 0 ? Number(rvfcExpectedDelayMs.toFixed(2)) : null,
+          rvfcPresentedFrames: rvfcPresented,
           audioPacketsReceived: inboundAudio
             ? statisticValue(inboundAudio, "packetsReceived") : 0,
           audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
@@ -3934,7 +3979,10 @@ async function updateStatistics() {
           audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
           audioJitterMs: (inboundAudio && typeof inboundAudio.jitter === "number") ? Number((inboundAudio.jitter * 1000).toFixed(2)) : 0,
           clientFrameIntervalMs: clientAvgIntervalMs > 0 ? Number(clientAvgIntervalMs.toFixed(2)) : 0,
-          clientFrameJitterMs: clientJitterMs > 0 ? Number(clientJitterMs.toFixed(2)) : 0
+          clientFrameJitterMs: clientJitterMs > 0 ? Number(clientJitterMs.toFixed(2)) : 0,
+          rvfcProcessingMs: rvfcProcessingMs > 0 ? Number(rvfcProcessingMs.toFixed(2)) : 0,
+          rvfcExpectedDelayMs: rvfcExpectedDelayMs > 0 ? Number(rvfcExpectedDelayMs.toFixed(2)) : 0,
+          rvfcPresentedFrames: rvfcPresented
         });
       }
     }

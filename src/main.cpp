@@ -1675,6 +1675,15 @@ private:
             if (data.contains("clientFrameJitterMs") && data["clientFrameJitterMs"].is_number()) {
                 clientSample.clientFrameJitterMs = data["clientFrameJitterMs"].get<double>();
             }
+            if (data.contains("rvfcProcessingMs") && data["rvfcProcessingMs"].is_number()) {
+                clientSample.rvfcProcessingMs = data["rvfcProcessingMs"].get<double>();
+            }
+            if (data.contains("rvfcExpectedDelayMs") && data["rvfcExpectedDelayMs"].is_number()) {
+                clientSample.rvfcExpectedDelayMs = data["rvfcExpectedDelayMs"].get<double>();
+            }
+            if (data.contains("rvfcPresentedFrames") && data["rvfcPresentedFrames"].is_number_unsigned()) {
+                clientSample.rvfcPresentedFrames = data["rvfcPresentedFrames"].get<std::uint64_t>();
+            }
 
             std::optional<gateway::telemetry::HostTelemetrySample> hostSample;
             std::shared_ptr<gateway::moonlight::MoonlightSession> moonlight;

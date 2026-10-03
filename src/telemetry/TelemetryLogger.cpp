@@ -239,6 +239,12 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         if (clientSample.videoJitterMs > 0.0) {
             activeSession_->videoJitterSamples.push_back(clientSample.videoJitterMs);
         }
+        if (clientSample.rvfcProcessingMs > 0.0) {
+            activeSession_->rvfcProcessingSamples.push_back(clientSample.rvfcProcessingMs);
+        }
+        if (clientSample.rvfcExpectedDelayMs > 0.0) {
+            activeSession_->rvfcDelaySamples.push_back(clientSample.rvfcExpectedDelayMs);
+        }
 
         if (hostSample) {
             if (hostSample->hostFps > 0.0f) {
@@ -273,8 +279,11 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
     }
 
     ss << "TV: " << std::fixed << std::setprecision(1) << clientSample.decodedFps << " FPS "
-       << "(decode: " << clientSample.decodeTimeMs << "ms, "
-       << "jit: " << clientSample.videoJitterMs << "ms, "
+       << "(decode: " << clientSample.decodeTimeMs << "ms, ";
+    if (clientSample.rvfcProcessingMs > 0.0) {
+        ss << "rvfc: " << clientSample.rvfcProcessingMs << "ms, ";
+    }
+    ss << "jit: " << clientSample.videoJitterMs << "ms, "
        << "rtt: " << clientSample.networkRttMs << "ms, "
        << "drop: " << clientSample.framesDropped
        << (clientSample.droppedPerSec > 0 ? " [+" + std::to_string(clientSample.droppedPerSec) + "/s]" : "")
@@ -309,6 +318,8 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     auto clientFpsDist = computeDistribution(activeSession_->clientFpsSamples);
     auto hostFpsDist = computeDistribution(activeSession_->hostFpsSamples);
     auto videoJitterDist = computeDistribution(activeSession_->videoJitterSamples);
+    auto rvfcProcDist = computeDistribution(activeSession_->rvfcProcessingSamples);
+    auto rvfcDelayDist = computeDistribution(activeSession_->rvfcDelaySamples);
 
     const auto& lastClient = activeSession_->lastClientSample;
     const auto totalFramesSent = activeSession_->lastHostSample ? activeSession_->lastHostSample->totalFrames : 0;
@@ -335,8 +346,14 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << std::fixed << std::setprecision(2) << dropRate << "% drop rate)\n"
        << "  Packets Lost (RTP):     " << totalPacketsLost << "\n\n"
        << "Performance Metrics Distribution:\n"
-       << formatDistributionLine("TV Decode Time", decodeDist, "ms")
-       << formatDistributionLine("Host Latency (Total)", hostLatencyDist, "ms")
+       << formatDistributionLine("TV Decode Time", decodeDist, "ms");
+    if (!activeSession_->rvfcProcessingSamples.empty()) {
+        ss << formatDistributionLine("TV RVFC Processing", rvfcProcDist, "ms");
+    }
+    if (!activeSession_->rvfcDelaySamples.empty()) {
+        ss << formatDistributionLine("TV RVFC Present Delay", rvfcDelayDist, "ms");
+    }
+    ss << formatDistributionLine("Host Latency (Total)", hostLatencyDist, "ms")
        << formatDistributionLine("Host Processing (Enc)", hostProcDist, "ms")
        << formatDistributionLine("Gateway Processing", gwLatencyDist, "ms")
        << formatDistributionLine("Gateway Flatten Time", flattenDist, "ms")

@@ -52,6 +52,9 @@ struct ClientTelemetrySample {
     double audioJitterMs = 0.0;
     double clientFrameIntervalMs = 0.0;
     double clientFrameJitterMs = 0.0;
+    double rvfcProcessingMs = 0.0;
+    double rvfcExpectedDelayMs = 0.0;
+    std::uint64_t rvfcPresentedFrames = 0;
 };
 
 struct HostTelemetrySample {
@@ -115,6 +118,8 @@ private:
         std::vector<double> clientFpsSamples;
         std::vector<double> hostFpsSamples;
         std::vector<double> videoJitterSamples;
+        std::vector<double> rvfcProcessingSamples;
+        std::vector<double> rvfcDelaySamples;
         ClientTelemetrySample lastClientSample;
         std::optional<HostTelemetrySample> lastHostSample;
     };

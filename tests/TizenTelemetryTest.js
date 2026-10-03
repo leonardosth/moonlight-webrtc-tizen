@@ -47,6 +47,9 @@ const expectedFields = [
   "audioJitterMs",
   "clientFrameIntervalMs",
   "clientFrameJitterMs",
+  "rvfcProcessingMs",
+  "rvfcExpectedDelayMs",
+  "rvfcPresentedFrames",
 ];
 
 for (const field of expectedFields) {

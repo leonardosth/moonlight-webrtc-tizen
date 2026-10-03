@@ -71,6 +71,9 @@ int main()
                 client.packetsReceived = 1000 * (i + 1);
                 client.packetsLost = 0;
                 client.currentMbps = 49.5;
+                client.rvfcProcessingMs = 1.0 + i * 0.1;
+                client.rvfcExpectedDelayMs = 5.0 + i * 0.2;
+                client.rvfcPresentedFrames = 100 * (i + 1);
 
                 gateway::telemetry::HostTelemetrySample host;
                 host.hostFps = 60.0f;
@@ -97,6 +100,8 @@ int main()
         require(logContent.find("50000 kbps (50.0 Mbps)") != std::string::npos, "Log must contain bitrate");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");
         require(logContent.find("TV Decode Time") != std::string::npos, "Log must contain TV Decode Time distribution");
+        require(logContent.find("TV RVFC Processing") != std::string::npos, "Log must contain TV RVFC Processing distribution");
+        require(logContent.find("TV RVFC Present Delay") != std::string::npos, "Log must contain TV RVFC Present Delay distribution");
         require(logContent.find("p50:") != std::string::npos, "Log must contain p50 metric");
         require(logContent.find("p95:") != std::string::npos, "Log must contain p95 metric");
         require(logContent.find("p99:") != std::string::npos, "Log must contain p99 metric");
