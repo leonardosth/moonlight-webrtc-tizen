@@ -1674,6 +1674,32 @@ async function handleRemoteCandidate(message) {
   await applyRemoteCandidate(candidate);
 }
 
+function injectVideoBandwidthSdp(sdp, bitrateKbps) {
+  if (!sdp || typeof sdp !== "string" || !bitrateKbps || bitrateKbps <= 0) {
+    return sdp;
+  }
+  if (sdp.indexOf("b=AS:") !== -1) {
+    return sdp.replace(/b=AS:\d+/g, "b=AS:" + String(bitrateKbps));
+  }
+  const videoIndex = sdp.indexOf("m=video");
+  if (videoIndex === -1) {
+    return sdp;
+  }
+  const nextLineEnd = sdp.indexOf("\r\n", videoIndex);
+  if (nextLineEnd === -1) {
+    return sdp;
+  }
+  const afterVideo = sdp.substring(nextLineEnd + 2);
+  let insertIndex = nextLineEnd + 2;
+  if (afterVideo.indexOf("c=") === 0) {
+    const cLineEnd = afterVideo.indexOf("\r\n");
+    if (cLineEnd !== -1) {
+      insertIndex = nextLineEnd + 2 + cLineEnd + 2;
+    }
+  }
+  return sdp.slice(0, insertIndex) + "b=AS:" + String(bitrateKbps) + "\r\n" + sdp.slice(insertIndex);
+}
+
 async function handleOffer(message) {
   if (typeof message.sessionId !== "number" || typeof message.sdp !== "string") {
     reportError("Invalid SDP offer", new Error("Missing sessionId or SDP"));
@@ -1690,9 +1716,23 @@ async function handleOffer(message) {
       await applyRemoteCandidate(pendingRemoteCandidates.shift());
     }
     const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
+    let localAnswer = answer;
+    if (selectedSession && selectedSession.bitrateKbps > 0) {
+      const modifiedSdp = injectVideoBandwidthSdp(answer.sdp, selectedSession.bitrateKbps);
+      try {
+        localAnswer = (typeof RTCSessionDescription !== "undefined")
+          ? new RTCSessionDescription({ type: "answer", sdp: modifiedSdp })
+          : { type: "answer", sdp: modifiedSdp };
+      } catch (_e) {
+        localAnswer = { type: "answer", sdp: modifiedSdp };
+      }
+    }
+    await peerConnection.setLocalDescription(localAnswer);
     if (peerConnection.localDescription && peerConnection.localDescription.sdp.includes("http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")) {
       log("WebRTC RTP playout-delay extension negotiated in answer");
+    }
+    if (peerConnection.localDescription && peerConnection.localDescription.sdp.includes("b=AS:")) {
+      log("WebRTC video bandwidth cap (b=AS) negotiated in answer");
     }
     sendGatewayMessage({
       type: "answer",
@@ -4288,3 +4328,9 @@ if (requestedAutostart) {
 }
 
 window.addEventListener("appcontrol", checkRequestedAppControl);
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    injectVideoBandwidthSdp: injectVideoBandwidthSdp,
+  };
+}

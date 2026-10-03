@@ -595,6 +595,22 @@ int main()
                     == 10,
                 "Video playout-delay extmap was not parsed");
 
+        const std::string bandwidthSdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "c=IN IP4 0.0.0.0\r\n"
+            "b=AS:70000\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+            "b=AS:128\r\n";
+        require(gateway::videoBandwidthKbps(bandwidthSdp) == 70000,
+                "videoBandwidthKbps failed to parse b=AS:70000");
+        require(gateway::hasExpectedVideoBandwidth(bandwidthSdp, 70000),
+                "hasExpectedVideoBandwidth failed for matching bitrate");
+        require(!gateway::hasExpectedVideoBandwidth(bandwidthSdp, 50000),
+                "hasExpectedVideoBandwidth accepted mismatching bitrate");
+        require(!gateway::hasExpectedVideoBandwidth(playoutDelaySdp, 70000),
+                "hasExpectedVideoBandwidth accepted SDP without b=AS");
+
         const auto capabilities = gateway::protocol::makeCapabilities();
         require(capabilities.at("resolutions").size() == 4
                     && capabilities.at("videoModes").size() == 12

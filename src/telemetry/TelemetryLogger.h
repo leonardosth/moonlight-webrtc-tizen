@@ -33,6 +33,7 @@ struct SessionParameters {
     bool bufferPool = true;
     bool frameDropPolicy = true;
     std::uint64_t frameDeadlineUs = 0;
+    int sdpBandwidthCapKbps = 0;
     std::string clientIp;
 };
 

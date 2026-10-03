@@ -589,6 +589,15 @@ private:
                         currentSession->requestStreamingStop();
                         return;
                     }
+                    if (settings.bitrateKbps > 0
+                        && !gateway::hasExpectedVideoBandwidth(sdp, settings.bitrateKbps)) {
+                        log("WebRTC SDP video bandwidth (b=AS) validation failed");
+                        sendSessionStatus(currentSession,
+                                          "error",
+                                          "WebRTC SDP does not contain the requested video bandwidth");
+                        currentSession->requestStreamingStop();
+                        return;
+                    }
                     if (!hasDataChannelApplicationSection(sdp)) {
                         log("WebRTC data-channel SDP validation failed");
                         sendSessionStatus(currentSession,
@@ -598,6 +607,10 @@ private:
                         return;
                     }
 
+                    if (settings.bitrateKbps > 0) {
+                        log("WebRTC video bandwidth cap (b=AS:"
+                            + std::to_string(settings.bitrateKbps) + ") enabled");
+                    }
                     log("Samsung Game Mode SDP imageattr enabled");
                     log("WebRTC data-channel application section enabled");
                     log("Outgoing SDP m=video section:\n"
@@ -737,6 +750,9 @@ private:
         video.addExtMap(rtc::Description::Entry::ExtMap(
             gateway::PreferredWebRtcPlayoutDelayExtensionId,
             std::string(gateway::WebRtcPlayoutDelayExtensionUri)));
+        if (settings.bitrateKbps > 0) {
+            video.setBitrate(settings.bitrateKbps);
+        }
         video.addSSRC(VideoSsrc, RtpCname, VideoMediaStreamId, "video");
 
         session->videoTrack = peerConnection->addTrack(video);
@@ -953,6 +969,7 @@ private:
             params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             params.rvfc = true;
             params.bufferPool = true;
+            params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 

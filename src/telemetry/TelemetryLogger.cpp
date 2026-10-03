@@ -215,6 +215,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 2MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
+       << "  - SDP Bandwidth Cap:    " << (params.sdpBandwidthCapKbps > 0 ? ("Enabled (b=AS:" + std::to_string(params.sdpBandwidthCapKbps) + ")") : "Disabled") << "\n"
        << "================================================================================\n";
 
     writeLocked(ss.str());

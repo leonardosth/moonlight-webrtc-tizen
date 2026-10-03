@@ -54,6 +54,7 @@ int main()
             params.audioChannels = 2;
             params.latencyMode = "Lowest Latency";
             params.frameDeadlineUs = 25000;
+            params.sdpBandwidthCapKbps = 50000;
             params.clientIp = "192.168.1.100:50000";
 
             logger.logSessionStart(params);
@@ -102,6 +103,8 @@ int main()
         require(logContent.find("50000 kbps (50.0 Mbps)") != std::string::npos, "Log must contain bitrate");
         require(logContent.find("Frame Drop Policy:    Active (25ms deadline)") != std::string::npos,
                 "Log must contain Frame Drop Policy");
+        require(logContent.find("SDP Bandwidth Cap:    Enabled (b=AS:50000)") != std::string::npos,
+                "Log must contain SDP Bandwidth Cap");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");
         require(logContent.find("TV Decode Time") != std::string::npos, "Log must contain TV Decode Time distribution");
         require(logContent.find("TV RVFC Processing") != std::string::npos, "Log must contain TV RVFC Processing distribution");
