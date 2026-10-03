@@ -160,6 +160,17 @@ target_link_libraries(moonlight_control PUBLIC
     ws2_32
 )
 
+add_library(telemetry_logger
+    src/telemetry/TelemetryLogger.cpp
+)
+
+target_compile_features(telemetry_logger PUBLIC cxx_std_20)
+target_include_directories(telemetry_logger PUBLIC src)
+target_link_libraries(telemetry_logger PUBLIC
+    gateway_protocol
+    moonlight_media_bridge
+)
+
 add_executable(moonlight_webrtc
     src/main.cpp
     src/gateway/WindowsServiceHost.cpp
@@ -177,6 +188,7 @@ target_link_libraries(moonlight_webrtc PRIVATE
     moonlight_input_bridge
     moonlight_media_bridge
     opus_file_reader
+    telemetry_logger
     wake_on_lan_address
     webrtc_media_sender
     LibDataChannel::LibDataChannel
@@ -224,22 +236,26 @@ if(BUILD_TESTING)
     )
     target_link_libraries(h264_annex_b_inspect PRIVATE h264_annex_b_reader)
 
-    add_test(
-        NAME h264_annex_b_inspect
-        COMMAND h264_annex_b_inspect
-            "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-720p60.h264"
-    )
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-720p60.h264")
+        add_test(
+            NAME h264_annex_b_inspect
+            COMMAND h264_annex_b_inspect
+                "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-720p60.h264"
+        )
+    endif()
 
     add_executable(opus_file_inspect
         tests/OpusFileReaderTest.cpp
     )
     target_link_libraries(opus_file_inspect PRIVATE opus_file_reader)
 
-    add_test(
-        NAME opus_file_inspect
-        COMMAND opus_file_inspect
-            "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-tone-48k-stereo.opus"
-    )
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-tone-48k-stereo.opus")
+        add_test(
+            NAME opus_file_inspect
+            COMMAND opus_file_inspect
+                "${CMAKE_CURRENT_SOURCE_DIR}/samples/test-tone-48k-stereo.opus"
+        )
+    endif()
 
     add_executable(moonlight_media_bridge_test
         tests/MoonlightMediaBridgeTest.cpp
@@ -332,4 +348,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(wake_on_lan_address_test PRIVATE wake_on_lan_address)
     add_test(NAME wake_on_lan_address_test COMMAND wake_on_lan_address_test)
+
+    add_executable(telemetry_logger_test
+        tests/TelemetryLoggerTest.cpp
+    )
+    target_link_libraries(telemetry_logger_test PRIVATE telemetry_logger)
+    add_test(NAME telemetry_logger_test COMMAND telemetry_logger_test)
 endif()

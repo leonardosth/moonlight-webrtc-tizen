@@ -64,7 +64,7 @@
         </section>
         <section class="settings-panel" data-settings-panel="about" hidden aria-label="About Moonlight WebRTC Client">
           <div class="setting-row setting-row-readonly"><span>Application</span><span class="setting-value"><strong>Moonlight WebRTC Client</strong></span></div>
-          <div class="setting-row setting-row-readonly"><span>Version</span><span class="setting-value"><strong>1.0.0</strong></span></div>
+          <div class="setting-row setting-row-readonly"><span>Version</span><span class="setting-value"><strong>1.1.0-dev</strong></span></div>
           <div class="setting-row setting-row-readonly"><span>Gateway protocol</span><span class="setting-value"><strong>Version 1</strong></span></div>
         </section>
       </div>
@@ -93,9 +93,13 @@
   <section id="streaming-screen" class="streaming-screen" hidden aria-label="Streaming session">
     <aside id="stream-overlay" class="stream-overlay"><h2 id="overlay-app">Desktop</h2><dl class="stream-facts"><div><dt>Resolution</dt><dd id="overlay-resolution">-</dd></div><div><dt>FPS</dt><dd id="overlay-fps">60</dd></div><div><dt>Codec</dt><dd id="overlay-codec">H.264</dd></div><div><dt>Bitrate</dt><dd id="overlay-bitrate">-</dd></div><div><dt>HDR</dt><dd id="overlay-hdr">Off</dd></div><div><dt>Gamepad</dt><dd id="overlay-gamepad">Disconnected</dd></div><div><dt>Connection</dt><dd id="overlay-connection">Starting</dd></div><div><dt>Interpolation</dt><dd id="overlay-interpolation">Off</dd></div></dl></aside>
     <aside id="stream-stats-overlay" class="stream-stats-overlay" hidden aria-label="Stream statistics">
-      <div class="stats-row"><span class="stats-label">FPS</span><span id="stats-fps" class="stats-value">—</span></div>
+      <div class="stats-row"><span class="stats-label">TV FPS</span><span id="stats-fps" class="stats-value">—</span></div>
+      <div class="stats-row"><span class="stats-label">Host FPS</span><span id="stats-host-fps" class="stats-value">—</span></div>
+      <div class="stats-row"><span class="stats-label">Frame Time</span><span id="stats-frame-time" class="stats-value">—</span></div>
+      <div class="stats-row"><span class="stats-label">Host Lat</span><span id="stats-host-latency" class="stats-value">—</span></div>
       <div class="stats-row"><span class="stats-label">Decode</span><span id="stats-decode-time" class="stats-value">—</span></div>
       <div class="stats-row"><span class="stats-label">Net RTT</span><span id="stats-rtt" class="stats-value">—</span></div>
+      <div class="stats-row"><span class="stats-label">Total Lat</span><span id="stats-total-latency" class="stats-value">—</span></div>
       <div class="stats-row"><span class="stats-label">Dropped</span><span id="stats-dropped" class="stats-value">0</span></div>
       <div class="stats-row"><span class="stats-label">Bitrate</span><span id="stats-bitrate" class="stats-value">—</span></div>
       <div class="stats-row"><span class="stats-label">Pkt Loss</span><span id="stats-packet-loss" class="stats-value">0</span></div>

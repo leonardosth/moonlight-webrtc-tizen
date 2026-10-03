@@ -110,7 +110,40 @@ try {
     }
     Set-ServiceDataAcl -Path $machineDataDirectory
 
-    $serviceCommand = '"{0}" --service --source=moonlight' -f $executable
+    $appDirectory = Split-Path -Parent $executable
+    $appLogsDirectory = Join-Path $appDirectory 'logs'
+    if (-not (Test-Path -LiteralPath $appLogsDirectory)) {
+        New-Item -ItemType Directory -Path $appLogsDirectory -Force | Out-Null
+    }
+
+    try {
+        $usersSid = [Security.Principal.SecurityIdentifier]'S-1-5-32-545'
+        $serviceSid = [Security.Principal.NTAccount]::new("NT SERVICE\$serviceName")
+        $logsAcl = Get-Acl -LiteralPath $appLogsDirectory
+        $logsInheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        $logsPropagation = [Security.AccessControl.PropagationFlags]::None
+        $logsAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $serviceSid, [Security.AccessControl.FileSystemRights]::FullControl,
+            $logsInheritance, $logsPropagation, [Security.AccessControl.AccessControlType]::Allow))
+        $logsAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $usersSid, [Security.AccessControl.FileSystemRights]::Modify,
+            $logsInheritance, $logsPropagation, [Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $appLogsDirectory -AclObject $logsAcl
+    } catch {
+        Write-Warning "Unable to configure logs directory ACL: $_"
+    }
+
+    $programDataLogs = Join-Path $machineDataDirectory 'logs'
+    if (Test-Path -LiteralPath $programDataLogs) {
+        try {
+            Get-ChildItem -LiteralPath $programDataLogs -Filter "*.log*" | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination $appLogsDirectory -Force
+            }
+        } catch {
+        }
+    }
+
+    $serviceCommand = '"{0}" --service --source=moonlight --log-dir="{1}"' -f $executable, $appLogsDirectory
     $serviceInstance = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'"
     if (-not $serviceInstance) {
         throw "Unable to find $serviceName for LocalService configuration"

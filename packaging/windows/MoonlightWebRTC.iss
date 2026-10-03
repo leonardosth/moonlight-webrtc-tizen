@@ -29,6 +29,9 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 
+[Dirs]
+Name: "{app}\logs"; Permissions: users-modify
+
 [Files]
 Source: "{#StageDir}\moonlight_webrtc.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\moonlight_webrtc_tray.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -38,6 +41,7 @@ Source: "{#SourceRoot}\scripts\windows\install-service.ps1"; DestDir: "{tmp}"; F
 
 [Icons]
 Name: "{group}\Moonlight WebRTC"; Filename: "{app}\moonlight_webrtc_tray.exe"; IconFilename: "{app}\moonlight_webrtc_tray.exe"
+Name: "{group}\Moonlight WebRTC Logs"; Filename: "{app}\logs"
 
 [Run]
 Filename: "{app}\moonlight_webrtc_tray.exe"; Description: "Launch Moonlight WebRTC"; Flags: nowait postinstall skipifsilent runasoriginaluser

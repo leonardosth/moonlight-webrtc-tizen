@@ -399,6 +399,14 @@ void MoonlightSession::onWebRtcKeyframeRequest()
     }
 }
 
+std::optional<MoonlightStreamDiagnostics> MoonlightSession::streamDiagnostics() const
+{
+    if (mediaBridge_) {
+        return mediaBridge_->currentStreamDiagnostics();
+    }
+    return std::nullopt;
+}
+
 void MoonlightSession::stageStartingCallback(int stage)
 {
     if (auto* session = activeSession_.load(std::memory_order_acquire)) {

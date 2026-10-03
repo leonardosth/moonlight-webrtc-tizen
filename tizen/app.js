@@ -109,8 +109,12 @@ const trackCounts = {
 const streamStatsOverlay = document.getElementById("stream-stats-overlay");
 const streamStats = {
   fps: document.getElementById("stats-fps"),
+  hostFps: document.getElementById("stats-host-fps"),
+  frameTime: document.getElementById("stats-frame-time"),
+  hostLatency: document.getElementById("stats-host-latency"),
   decodeTime: document.getElementById("stats-decode-time"),
   rtt: document.getElementById("stats-rtt"),
+  totalLatency: document.getElementById("stats-total-latency"),
   dropped: document.getElementById("stats-dropped"),
   bitrate: document.getElementById("stats-bitrate"),
   packetLoss: document.getElementById("stats-packet-loss"),
@@ -214,8 +218,93 @@ let av1StreamStartTime = 0;
 let av1DecodeVerified = false;
 let av1LastDecodedCount = 0;
 let av1LastDecodedTime = 0;
+let lastHostDiagnostics = null;
+let lastHostDiagnosticsTime = 0;
+let previousDroppedSample = null;
+let rvfcHandle = null;
+let rvfcRenderedFrames = 0;
+let rvfcLastTime = 0;
+let rvfcIntervals = [];
+
+function startVideoFrameCallback() {
+  if (!videoElement || typeof videoElement.requestVideoFrameCallback !== "function") {
+    return;
+  }
+  if (rvfcHandle !== null) {
+    return;
+  }
+  function onFrame(now) {
+    rvfcRenderedFrames++;
+    if (rvfcLastTime > 0) {
+      const delta = now - rvfcLastTime;
+      if (delta > 0 && delta < 500) {
+        rvfcIntervals.push(delta);
+        if (rvfcIntervals.length > 30) {
+          rvfcIntervals.shift();
+        }
+      }
+    }
+    rvfcLastTime = now;
+    if (sessionState === "streaming") {
+      rvfcHandle = videoElement.requestVideoFrameCallback(onFrame);
+    } else {
+      rvfcHandle = null;
+    }
+  }
+  rvfcHandle = videoElement.requestVideoFrameCallback(onFrame);
+}
+
+function stopVideoFrameCallback() {
+  if (videoElement && typeof videoElement.cancelVideoFrameCallback === "function" && rvfcHandle !== null) {
+    videoElement.cancelVideoFrameCallback(rvfcHandle);
+  }
+  rvfcHandle = null;
+  rvfcLastTime = 0;
+  rvfcIntervals = [];
+}
+
+let hostDiagnosticsFirstReceived = false;
+function handleHostDiagnostics(msg) {
+  lastHostDiagnostics = msg;
+  lastHostDiagnosticsTime = performance.now();
+  if (!hostDiagnosticsFirstReceived) {
+    hostDiagnosticsFirstReceived = true;
+    log("Host diagnostics received via DataChannel: hostFps=" + msg.hostFps
+      + " hostProcessing=" + msg.hostProcessingLatencyMs + "ms"
+      + " gatewayLat=" + msg.gatewayLatencyMs + "ms"
+      + " totalHost=" + msg.totalHostLatencyMs + "ms");
+  }
+
+  if (statistics.receivedColorSpace && msg.colorSpace) {
+    statistics.receivedColorSpace.textContent = msg.colorSpace;
+  }
+  if (statistics.receivedTransfer && msg.transfer) {
+    statistics.receivedTransfer.textContent = msg.transfer;
+  }
+  if (statistics.receivedBitDepth && msg.bitDepth) {
+    statistics.receivedBitDepth.textContent = String(msg.bitDepth) + " bit" + (msg.main10Verified ? " (verified)" : "");
+  }
+  if (statistics.receivedHdr && typeof msg.hdrActive !== "undefined") {
+    statistics.receivedHdr.textContent = msg.hdrActive ? "Active" : "Off";
+  }
+}
+
 let lastStatisticsConsoleTime = 0;
+let lastClientTelemetrySendTime = 0;
 let lastStatisticsSampleTime = 0;
+
+function sendClientTelemetry(data) {
+  if (controlDataChannel && controlDataChannel.readyState === "open") {
+    try {
+      controlDataChannel.send(JSON.stringify({
+        type: "client-telemetry",
+        timestamp: Date.now(),
+        data: data
+      }));
+    } catch (_e) {
+    }
+  }
+}
 // Half the console-log period, so that log still lands on its own five-second schedule.
 const HIDDEN_STATISTICS_INTERVAL_MS = 2500;
 let applications = [];
@@ -1190,6 +1279,7 @@ function handleSessionStatus(message) {
     resumeGamepadInput();
     setHomeMessage("Streaming", false);
     autostartEverStreamed = true;
+    startVideoFrameCallback();
     if (selectedSession && selectedSession.codec === "av1") {
       av1StreamStartTime = performance.now();
       av1DecodeVerified = false;
@@ -1579,6 +1669,9 @@ async function handleOffer(message) {
 }
 
 function closePeerConnection() {
+  stopVideoFrameCallback();
+  lastHostDiagnostics = null;
+  previousDroppedSample = null;
   av1StreamStartTime = 0;
   av1DecodeVerified = false;
   av1LastDecodedCount = 0;
@@ -3401,6 +3494,16 @@ function configureControlDataChannel(channel) {
     syncGamepadUi();
   };
   channel.onmessage = function (event) {
+    if (typeof event.data === "string") {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg && msg.type === "host-diagnostics") {
+          handleHostDiagnostics(msg);
+          return;
+        }
+      } catch (error) {
+      }
+    }
     gamepadInputManager.handleControlMessage(event.data);
   };
   channel.onclose = function () {
@@ -3540,24 +3643,21 @@ async function updateStatistics() {
           av1DecodeVerified = true;
           av1LastDecodedCount = framesDecodedNum;
           av1LastDecodedTime = now;
+          if (typeof durableStorage !== "undefined" && durableStorage) {
+            durableStorage.removeItem("moonlight-webrtc.av1-unsupported");
+          }
+          webRtcAv1Supported = true;
+          log("AV1 hardware decoding active and verified (" + framesDecodedNum + " frames decoded)");
         } else {
           if (framesDecodedNum > av1LastDecodedCount) {
             av1LastDecodedCount = framesDecodedNum;
             av1LastDecodedTime = now;
-          } else if (av1LastDecodedTime > 0 && (now - av1LastDecodedTime >= 4000)) {
-            log("AV1 stream stall detected: framesDecoded stuck at " + framesDecodedNum + " for " + ((now - av1LastDecodedTime) / 1000).toFixed(1) + "s — auto-falling back to HEVC");
-            av1LastDecodedTime = 0;
-            handleSessionStatus({
-              state: "codec-unsupported",
-              message: "AV1 video froze / stalled after decoding started"
-            });
-            return;
           }
         }
       } else if (!av1DecodeVerified && av1StreamStartTime > 0) {
         const elapsedMs = now - av1StreamStartTime;
-        if ((elapsedMs >= 3500 && packetsReceivedNum > 0) || elapsedMs >= 5000) {
-          log("AV1 decode failure detected: 0 frames decoded after " + (elapsedMs / 1000).toFixed(1) + "s (packets received: " + packetsReceivedNum + ")");
+        if (elapsedMs >= 8000 && packetsReceivedNum > 50 && framesDecodedNum === 0) {
+          log("AV1 decode failure detected: 0 frames decoded after " + (elapsedMs / 1000).toFixed(1) + "s despite packets received");
           log("TV browser cannot decode AV1 via WebRTC (black screen) — auto-falling back to HEVC");
           av1StreamStartTime = 0;
           if (typeof durableStorage !== "undefined" && durableStorage) {
@@ -3595,20 +3695,50 @@ async function updateStatistics() {
         ? videoTrack.getSettings()
         : null;
       const runtimeSources = [videoSettings, inboundVideo, codecReport];
-      displayRuntimeValue(statistics.receivedColorSpace, availableRuntimeValue(
-        runtimeSources, ["colorSpace", "colourSpace", "colorPrimaries"]));
-      displayRuntimeValue(statistics.receivedTransfer, availableRuntimeValue(
-        runtimeSources, ["transferCharacteristics", "transferFunction", "colorTransfer"]));
-      displayRuntimeValue(statistics.receivedBitDepth, availableRuntimeValue(
-        runtimeSources, ["bitDepth", "bitsPerComponent"]));
-      displayRuntimeValue(statistics.receivedHdr, availableRuntimeValue(
-        runtimeSources, ["hdr", "hdrMetadataType", "highDynamicRange"]));
+      // Use performance.now() for the comparison since lastHostDiagnosticsTime is
+      // also from performance.now(). The WebRTC stats timestamp (sampleTime) may use
+      // a different clock epoch on some platforms (e.g. Tizen), which would cause the
+      // staleness check to always fail.
+      const nowPerf = performance.now();
+      const isHostRecent = lastHostDiagnostics && (nowPerf - lastHostDiagnosticsTime) < 5000;
+
+      let resolvedColorSpace = availableRuntimeValue(
+        runtimeSources, ["colorSpace", "colourSpace", "colorPrimaries"]);
+      if (resolvedColorSpace === "unavailable" && isHostRecent && lastHostDiagnostics.colorSpace) {
+        resolvedColorSpace = lastHostDiagnostics.colorSpace;
+      }
+      displayRuntimeValue(statistics.receivedColorSpace, resolvedColorSpace);
+
+      let resolvedTransfer = availableRuntimeValue(
+        runtimeSources, ["transferCharacteristics", "transferFunction", "colorTransfer"]);
+      if (resolvedTransfer === "unavailable" && isHostRecent && lastHostDiagnostics.transfer) {
+        resolvedTransfer = lastHostDiagnostics.transfer;
+      }
+      displayRuntimeValue(statistics.receivedTransfer, resolvedTransfer);
+
+      let resolvedBitDepth = availableRuntimeValue(
+        runtimeSources, ["bitDepth", "bitsPerComponent"]);
+      if (resolvedBitDepth === "unavailable" && isHostRecent && lastHostDiagnostics.bitDepth) {
+        resolvedBitDepth = String(lastHostDiagnostics.bitDepth) + " bit" + (lastHostDiagnostics.main10Verified ? " (verified)" : "");
+      }
+      displayRuntimeValue(statistics.receivedBitDepth, resolvedBitDepth);
+
+      let resolvedHdr = availableRuntimeValue(
+        runtimeSources, ["hdr", "hdrMetadataType", "highDynamicRange"]);
+      if (resolvedHdr === "unavailable" && isHostRecent && typeof lastHostDiagnostics.hdrActive !== "undefined") {
+        resolvedHdr = lastHostDiagnostics.hdrActive ? "Active" : "Off";
+      }
+      displayRuntimeValue(statistics.receivedHdr, resolvedHdr);
+
       let currentFps = "0";
+      let decodedAvgIntervalMs = 0;
       if (previousDecodedSample && sampleTime > previousDecodedSample.time) {
         const elapsedSeconds = (sampleTime - previousDecodedSample.time) / 1000;
-        currentFps = (
-          (framesDecoded - previousDecodedSample.frames) / elapsedSeconds
-        ).toFixed(1);
+        const framesDelta = framesDecoded - previousDecodedSample.frames;
+        if (elapsedSeconds > 0 && framesDelta > 0) {
+          currentFps = (framesDelta / elapsedSeconds).toFixed(1);
+          decodedAvgIntervalMs = (elapsedSeconds * 1000) / framesDelta;
+        }
         statistics.video.decodedFps.textContent = currentFps;
       }
       previousDecodedSample = { time: sampleTime, frames: framesDecoded };
@@ -3621,20 +3751,134 @@ async function updateStatistics() {
       }
       previousBytesSample = { time: sampleTime, bytes: bytesReceived };
 
+      let clientAvgIntervalMs = 0;
+      let clientJitterMs = 0;
+      // Compute frame interval from RVFC if available
+      let rvfcAvgIntervalMs = 0;
+      let rvfcJitterMs = 0;
+      if (rvfcIntervals.length > 1) {
+        const sum = rvfcIntervals.reduce(function (a, b) { return a + b; }, 0);
+        rvfcAvgIntervalMs = sum / rvfcIntervals.length;
+        const sqDiffSum = rvfcIntervals.reduce(function (acc, val) {
+          const diff = val - rvfcAvgIntervalMs;
+          return acc + diff * diff;
+        }, 0);
+        rvfcJitterMs = Math.sqrt(sqDiffSum / rvfcIntervals.length);
+      }
+
+      // On Samsung Tizen TVs, requestVideoFrameCallback (RVFC) is throttled by the WebKit
+      // compositor to ~9 Hz (~111ms) when the video is played on the hardware video overlay plane,
+      // even while the video plays smoothly at full 60 FPS.
+      // Therefore, if RVFC reports > 35ms on a 60 FPS stream (or is > 1.5x the expected interval),
+      // we reject RVFC and use the actual decoded FPS interval or host frame interval.
+      const targetFps = (selectedSession && selectedSession.fps) ? selectedSession.fps : 60;
+      const expectedIntervalMs = 1000 / targetFps;
+
+      if (decodedAvgIntervalMs > 0 && (rvfcAvgIntervalMs <= 0 || rvfcAvgIntervalMs > expectedIntervalMs * 1.5)) {
+        clientAvgIntervalMs = decodedAvgIntervalMs;
+        clientJitterMs = (isHostRecent && typeof lastHostDiagnostics.hostFrameJitterMs === "number" && lastHostDiagnostics.hostFrameJitterMs > 0)
+          ? lastHostDiagnostics.hostFrameJitterMs
+          : 0;
+      } else if (rvfcAvgIntervalMs > 0 && rvfcAvgIntervalMs <= expectedIntervalMs * 1.5) {
+        clientAvgIntervalMs = rvfcAvgIntervalMs;
+        clientJitterMs = rvfcJitterMs;
+      } else if (decodedAvgIntervalMs > 0) {
+        clientAvgIntervalMs = decodedAvgIntervalMs;
+      } else if (isHostRecent && lastHostDiagnostics.hostFrameIntervalMs > 0) {
+        clientAvgIntervalMs = lastHostDiagnostics.hostFrameIntervalMs;
+        clientJitterMs = lastHostDiagnostics.hostFrameJitterMs || 0;
+      }
+
+      let droppedPerSec = 0;
+      const currentDropped = statisticValue(inboundVideo, "framesDropped");
+      if (previousDroppedSample && sampleTime > previousDroppedSample.time) {
+        const elapsedSec = (sampleTime - previousDroppedSample.time) / 1000;
+        if (elapsedSec > 0) {
+          droppedPerSec = Math.max(0, (currentDropped - previousDroppedSample.dropped) / elapsedSec);
+        }
+      }
+      previousDroppedSample = { time: sampleTime, dropped: currentDropped };
+
+      let hostLatencyMs = null;
+      let hostProcessingMs = null;
+      if (isHostRecent) {
+        hostProcessingMs = typeof lastHostDiagnostics.hostProcessingLatencyMs === "number"
+          ? lastHostDiagnostics.hostProcessingLatencyMs
+          : null;
+        let rawGw = typeof lastHostDiagnostics.gatewayLatencyMs === "number"
+          ? lastHostDiagnostics.gatewayLatencyMs
+          : 0;
+        if (rawGw < 0 || rawGw > 500) {
+          rawGw = 0;
+        }
+        hostLatencyMs = hostProcessingMs !== null
+          ? hostProcessingMs + rawGw
+          : null;
+      }
+      const decodeMs = (typeof inboundVideo.totalDecodeTime === "number" && framesDecoded > 0)
+        ? (inboundVideo.totalDecodeTime / framesDecoded) * 1000
+        : null;
+      const oneWayNetMs = networkRttMs !== null ? networkRttMs / 2 : null;
+      let totalLatencyMs = null;
+      if (hostLatencyMs !== null && decodeMs !== null) {
+        totalLatencyMs = hostLatencyMs + (oneWayNetMs !== null ? oneWayNetMs : 0) + decodeMs;
+      }
+
       if (streamStats.fps) {
         streamStats.fps.textContent = currentFps !== "0" ? currentFps + " FPS" : "—";
-        if (typeof inboundVideo.totalDecodeTime === "number" && framesDecoded > 0) {
-          const avgDecodeMs = (inboundVideo.totalDecodeTime / framesDecoded) * 1000;
-          streamStats.decodeTime.textContent = avgDecodeMs.toFixed(1) + " ms";
-        } else {
-          streamStats.decodeTime.textContent = "—";
+        if (streamStats.hostFps) {
+          if (isHostRecent && typeof lastHostDiagnostics.hostFps === "number" && lastHostDiagnostics.hostFps > 0) {
+            streamStats.hostFps.textContent = lastHostDiagnostics.hostFps.toFixed(1) + " FPS";
+          } else {
+            streamStats.hostFps.textContent = "—";
+          }
+        }
+        if (streamStats.frameTime) {
+          if (clientAvgIntervalMs > 0) {
+            streamStats.frameTime.textContent = clientAvgIntervalMs.toFixed(1) + " ms"
+              + (clientJitterMs >= 0.1 ? " (±" + clientJitterMs.toFixed(1) + ")" : "");
+          } else if (isHostRecent && lastHostDiagnostics.hostFrameIntervalMs > 0) {
+            streamStats.frameTime.textContent = lastHostDiagnostics.hostFrameIntervalMs.toFixed(1) + " ms";
+          } else {
+            streamStats.frameTime.textContent = "—";
+          }
+        }
+        if (streamStats.hostLatency) {
+          if (hostProcessingMs !== null) {
+            let gwMs = isHostRecent && typeof lastHostDiagnostics.gatewayLatencyMs === "number"
+              ? lastHostDiagnostics.gatewayLatencyMs : 0;
+            if (gwMs < 0 || gwMs > 500) {
+              gwMs = 0;
+            }
+            const totalHostMs = hostProcessingMs + gwMs;
+            streamStats.hostLatency.textContent = totalHostMs.toFixed(1) + " ms"
+              + (gwMs > 0 ? " (enc " + hostProcessingMs.toFixed(1) + " + gw " + gwMs.toFixed(1) + ")" : "");
+          } else {
+            streamStats.hostLatency.textContent = "—";
+          }
+        }
+        if (streamStats.decodeTime) {
+          streamStats.decodeTime.textContent = decodeMs !== null ? decodeMs.toFixed(1) + " ms" : "—";
         }
         if (streamStats.rtt) {
           streamStats.rtt.textContent = networkRttMs !== null ? networkRttMs.toFixed(1) + " ms" : "—";
         }
-        streamStats.dropped.textContent = String(statisticValue(inboundVideo, "framesDropped"));
-        streamStats.bitrate.textContent = currentMbps !== "—" ? currentMbps + " Mbps" : "—";
-        streamStats.packetLoss.textContent = String(statisticValue(inboundVideo, "packetsLost"));
+        if (streamStats.totalLatency) {
+          streamStats.totalLatency.textContent = totalLatencyMs !== null ? totalLatencyMs.toFixed(1) + " ms" : "—";
+        }
+        if (streamStats.dropped) {
+          streamStats.dropped.textContent = String(currentDropped) + (droppedPerSec > 0 ? " (" + droppedPerSec.toFixed(1) + "/s)" : "");
+        }
+        if (streamStats.bitrate) {
+          streamStats.bitrate.textContent = currentMbps !== "—" ? currentMbps + " Mbps" : "—";
+        }
+        if (streamStats.packetLoss) {
+          streamStats.packetLoss.textContent = String(statisticValue(inboundVideo, "packetsLost"));
+        }
+        if (streamStats.jitter) {
+          const rtpJitter = statisticValue(inboundVideo, "jitter");
+          streamStats.jitter.textContent = typeof rtpJitter === "number" ? (rtpJitter * 1000).toFixed(1) + " ms" : "—";
+        }
       }
 
       if (sampleTime - lastStatisticsConsoleTime >= 5000) {
@@ -3667,6 +3911,29 @@ async function updateStatistics() {
           gamepadConnected: activeGamepad() !== null,
         }));
       }
+
+      if (sampleTime - lastClientTelemetrySendTime >= 2000) {
+        lastClientTelemetrySendTime = sampleTime;
+        const rtpJitterVal = statisticValue(inboundVideo, "jitter");
+        sendClientTelemetry({
+          decodedFps: Number(currentFps) || 0,
+          decodeTimeMs: decodeMs !== null ? Number(decodeMs.toFixed(2)) : 0,
+          networkRttMs: networkRttMs !== null ? Number(networkRttMs.toFixed(1)) : 0,
+          videoJitterMs: typeof rtpJitterVal === "number" ? Number((rtpJitterVal * 1000).toFixed(2)) : 0,
+          framesReceived: statisticValue(inboundVideo, "framesReceived"),
+          framesDecoded: framesDecoded,
+          framesDropped: currentDropped,
+          droppedPerSec: Number(droppedPerSec.toFixed(1)),
+          packetsReceived: statisticValue(inboundVideo, "packetsReceived"),
+          packetsLost: statisticValue(inboundVideo, "packetsLost"),
+          currentMbps: currentMbps !== "—" ? Number(currentMbps) : 0,
+          audioPacketsReceived: inboundAudio ? statisticValue(inboundAudio, "packetsReceived") : 0,
+          audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
+          audioJitterMs: (inboundAudio && typeof inboundAudio.jitter === "number") ? Number((inboundAudio.jitter * 1000).toFixed(2)) : 0,
+          clientFrameIntervalMs: clientAvgIntervalMs > 0 ? Number(clientAvgIntervalMs.toFixed(2)) : 0,
+          clientFrameJitterMs: clientJitterMs > 0 ? Number(clientJitterMs.toFixed(2)) : 0
+        });
+      }
     }
 
     if (inboundAudio) {
@@ -3675,9 +3942,9 @@ async function updateStatistics() {
       statistics.audio.bytesReceived.textContent = statisticValue(inboundAudio, "bytesReceived");
       const jitterVal = statisticValue(inboundAudio, "jitter");
       statistics.audio.jitter.textContent = Number(jitterVal).toFixed(6);
-      if (streamStats.jitter) {
-        streamStats.jitter.textContent = (Number(jitterVal) * 1000).toFixed(1) + " ms";
-      }
+      // Note: do NOT overwrite streamStats.jitter here — it was already set above
+      // from the video inbound-rtp jitter. Audio jitter belongs in the diagnostics
+      // panel only.
     }
   } catch (error) {
     if (!statisticsErrorReported) {

@@ -15,12 +15,14 @@
 #include "moonlight/input/MoonlightInputBridge.h"
 #include "platform/WakeOnLanAddress.h"
 #include "session/StreamSettings.h"
+#include "telemetry/TelemetryLogger.h"
 #include "webrtc/SamsungSdp.h"
 #include "webrtc/WebRtcMediaSender.h"
 
 #include <atomic>
 #include <chrono>
 #include <charconv>
+#include <cmath>
 #include <csignal>
 #include <condition_variable>
 #include <cstdint>
@@ -47,9 +49,61 @@
 #include <openssl/evp.h>
 #include <rtc/rtc.hpp>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shlobj.h>
+#endif
+
 namespace {
 
 using Json = nlohmann::json;
+
+#if defined(_WIN32)
+std::filesystem::path currentExecutableDirectory()
+{
+    std::wstring buffer(MAX_PATH, L'\0');
+    DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    while (length == buffer.size()) {
+        buffer.resize(buffer.size() * 2);
+        length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    }
+    if (length == 0) {
+        return std::filesystem::current_path();
+    }
+    buffer.resize(length);
+    return std::filesystem::path(buffer).parent_path();
+}
+#endif
+
+std::filesystem::path resolveLogDirectory(
+    const std::optional<std::filesystem::path>& explicitDir,
+    const std::optional<std::filesystem::path>& dataDir)
+{
+    if (explicitDir) {
+        return *explicitDir;
+    }
+
+#if defined(_WIN32)
+    const auto exeDir = currentExecutableDirectory();
+    const auto appLogsDir = exeDir / "logs";
+    std::error_code ec;
+    if (std::filesystem::is_directory(appLogsDir, ec) || std::filesystem::exists(appLogsDir, ec)) {
+        return appLogsDir;
+    }
+#endif
+
+    if (dataDir) {
+        return *dataDir / "logs";
+    }
+
+    return std::filesystem::path("logs");
+}
 
 constexpr std::uint8_t VideoPayloadType = 96;
 constexpr std::uint8_t AudioPayloadType = 111;
@@ -154,6 +208,7 @@ struct ProgramOptions {
     std::optional<std::filesystem::path> dataDirectory;
     bool dataDirectoryExplicit = false;
     std::optional<std::filesystem::path> migrationSourceDirectory;
+    std::optional<std::filesystem::path> logDirectory;
 };
 
 ProgramOptions parseProgramOptions(int argc, char** argv)
@@ -178,13 +233,15 @@ ProgramOptions parseProgramOptions(int argc, char** argv)
         } else if (argument.starts_with("--data-dir=") && argument.size() > 11) {
             options.dataDirectory = std::filesystem::path(argument.substr(11));
             options.dataDirectoryExplicit = true;
+        } else if (argument.starts_with("--log-dir=") && argument.size() > 10) {
+            options.logDirectory = std::filesystem::path(argument.substr(10));
         } else if (argument.starts_with("--migrate-data-from=") && argument.size() > 20) {
             options.migrationSourceDirectory = std::filesystem::path(argument.substr(20));
         } else {
             throw std::invalid_argument(
                 "Usage: moonlight_webrtc [--source=test|--source=moonlight] "
                 "[--host=<host>[:<port>]] [--app=<name>] [--pair] [--console|--service] "
-                "[--data-dir=<path>] [--migrate-data-from=<path>]");
+                "[--data-dir=<path>] [--log-dir=<path>] [--migrate-data-from=<path>]");
         }
     }
 
@@ -220,6 +277,7 @@ ProgramOptions parseProgramOptions(int argc, char** argv)
         options.dataDirectory = gateway::moonlight::MoonlightIdentity::resolveStorageDirectory(
             options.dataDirectory, gateway::moonlight::MoonlightDataDirectoryMode::Service);
     }
+    options.logDirectory = resolveLogDirectory(options.logDirectory, options.dataDirectory);
     return options;
 }
 
@@ -269,6 +327,8 @@ struct Session {
     std::uint64_t sessionId = 0;
     gateway::StreamSettings settings = gateway::defaultStreamSettings();
     std::optional<int> applicationId;
+    std::string applicationTitle;
+    std::string clientAddress;
     std::optional<std::string> wakeOnLanMacAddress;
     bool streamingActive = false;
 
@@ -308,10 +368,19 @@ public:
                         : nullptr)
         , logger_(std::move(logger))
         , server_(makeServerConfiguration())
+        , telemetryLogger_(
+            options.logDirectory.value_or(
+                options.dataDirectory ? (*options.dataDirectory / "logs") : std::filesystem::path("logs")),
+            "session_telemetry.log",
+            10 * 1024 * 1024)
     {
         moonlightOptions_.allowUnavailableHostDisplayForHdr =
             options.hostMode == ProgramHostMode::Service;
         log("Moonlight WebRTC Gateway");
+        const auto telemetryPath = (options.logDirectory.value_or(
+            options.dataDirectory ? (*options.dataDirectory / "logs") : std::filesystem::path("logs")))
+            / "session_telemetry.log";
+        log("Telemetry log destination: " + telemetryPath.string());
         server_.onClient([this](std::shared_ptr<rtc::WebSocket> socket) {
             acceptClient(std::move(socket));
         });
@@ -600,8 +669,11 @@ private:
                 || !std::holds_alternative<std::string>(data)) {
                 return;
             }
-            if (!inputBridge->handleControlMessage(
-                    std::get<std::string>(std::move(data)))) {
+            const auto text = std::get<std::string>(std::move(data));
+            if (handleClientTelemetryMessage(currentSession, text)) {
+                return;
+            }
+            if (!inputBridge->handleControlMessage(text)) {
                 log("Rejected malformed gamepad control message");
             }
         });
@@ -844,9 +916,42 @@ private:
                 session->streamingActive = true;
             }
             sendSessionStatus(session, "streaming");
+
+            gateway::telemetry::SessionParameters params;
+            params.sessionId = session->sessionId;
+            params.appTitle = session->applicationTitle;
+            params.width = session->settings.width;
+            params.height = session->settings.height;
+            params.fps = session->settings.fps;
+            params.codec = std::string(gateway::videoCodecName(session->settings.codec));
+            params.bitrateKbps = session->settings.bitrateKbps;
+            params.hdr = session->settings.hdr;
+            params.audioChannels = session->settings.audioChannels;
+            params.latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
+            params.gameMode = true;
+            params.rtpPlayoutDelay = false;
+            params.rvfc = true;
+            params.clientIp = session->clientAddress;
+            telemetryLogger_.logSessionStart(params);
+
             std::unique_lock lock(session->streamMutex);
-            session->streamCondition.wait(
-                lock, [&session] { return session->stopRequested; });
+            auto lastDiagTime = std::chrono::steady_clock::now();
+            while (!session->stopRequested) {
+                session->streamCondition.wait_for(
+                    lock,
+                    std::chrono::milliseconds(250),
+                    [&session] { return session->stopRequested; });
+                if (session->stopRequested) {
+                    break;
+                }
+                const auto now = std::chrono::steady_clock::now();
+                if (now - lastDiagTime >= std::chrono::milliseconds(500)) {
+                    lastDiagTime = now;
+                    lock.unlock();
+                    sendHostDiagnostics(session);
+                    lock.lock();
+                }
+            }
         } catch (const std::exception& error) {
             log("Moonlight streaming error: " + std::string(error.what()));
             sendSessionStatus(session, "error", error.what());
@@ -861,6 +966,7 @@ private:
             session->moonlightSession.reset();
         }
         log("Moonlight streaming stopped");
+        telemetryLogger_.logSessionEnd(session->sessionId);
         if (session->peerConnected) {
             sendSessionStatus(session, "idle");
         }
@@ -1452,6 +1558,148 @@ private:
         log("Session status: " + std::string(state));
     }
 
+    void sendHostDiagnostics(const std::shared_ptr<Session>& session)
+    {
+        if (!session) {
+            return;
+        }
+        std::shared_ptr<gateway::moonlight::MoonlightSession> moonlight;
+        std::shared_ptr<rtc::DataChannel> controlChannel;
+        {
+            const std::lock_guard lock(session->streamMutex);
+            moonlight = session->moonlightSession;
+            controlChannel = session->controlChannel;
+        }
+        if (!moonlight || !controlChannel || !controlChannel->isOpen()) {
+            return;
+        }
+        const auto diag = moonlight->streamDiagnostics();
+        if (!diag || !diag->valid) {
+            return;
+        }
+
+        Json message;
+        message["type"] = "host-diagnostics";
+        message["hdrActive"] = diag->hdrActive;
+        message["colorSpace"] = diag->colorSpaceName;
+        message["transfer"] = diag->hdrActive ? "SMPTE ST 2084 (PQ)" : "BT.709";
+        message["bitDepth"] = diag->bitDepth;
+        message["main10Verified"] = diag->main10Verified;
+        message["codec"] = diag->codec;
+        message["width"] = diag->width;
+        message["height"] = diag->height;
+        message["targetFps"] = diag->fps;
+        message["hostFps"] = std::round(diag->hostFps * 10.0f) / 10.0f;
+        message["hostFrameIntervalMs"] = std::round(diag->hostFrameIntervalMs * 10.0f) / 10.0f;
+        message["hostFrameJitterMs"] = std::round(diag->hostFrameJitterMs * 10.0f) / 10.0f;
+        message["hostProcessingLatencyMs"] = std::round(diag->hostProcessingLatencyMs * 10.0f) / 10.0f;
+        message["gatewayLatencyMs"] = std::round(diag->gatewayLatencyMs * 10.0f) / 10.0f;
+        message["totalHostLatencyMs"] = std::round(diag->totalHostLatencyMs * 10.0f) / 10.0f;
+        message["totalFrames"] = diag->totalFrames;
+
+        try {
+            controlChannel->send(message.dump());
+        } catch (...) {
+        }
+    }
+
+    bool handleClientTelemetryMessage(const std::shared_ptr<Session>& session,
+                                      const std::string& text)
+    {
+        if (text.find("\"client-telemetry\"") == std::string::npos) {
+            return false;
+        }
+
+        try {
+            const auto json = Json::parse(text);
+            if (!json.is_object() || !json.contains("type")
+                || json["type"] != "client-telemetry"
+                || !json.contains("data") || !json["data"].is_object()) {
+                return false;
+            }
+
+            const auto& data = json["data"];
+            gateway::telemetry::ClientTelemetrySample clientSample;
+            clientSample.timestamp = std::chrono::system_clock::now();
+
+            if (data.contains("decodedFps") && data["decodedFps"].is_number()) {
+                clientSample.decodedFps = data["decodedFps"].get<double>();
+            }
+            if (data.contains("decodeTimeMs") && data["decodeTimeMs"].is_number()) {
+                clientSample.decodeTimeMs = data["decodeTimeMs"].get<double>();
+            }
+            if (data.contains("networkRttMs") && data["networkRttMs"].is_number()) {
+                clientSample.networkRttMs = data["networkRttMs"].get<double>();
+            }
+            if (data.contains("videoJitterMs") && data["videoJitterMs"].is_number()) {
+                clientSample.videoJitterMs = data["videoJitterMs"].get<double>();
+            }
+            if (data.contains("framesReceived") && data["framesReceived"].is_number_unsigned()) {
+                clientSample.framesReceived = data["framesReceived"].get<std::uint64_t>();
+            }
+            if (data.contains("framesDecoded") && data["framesDecoded"].is_number_unsigned()) {
+                clientSample.framesDecoded = data["framesDecoded"].get<std::uint64_t>();
+            }
+            if (data.contains("framesDropped") && data["framesDropped"].is_number_unsigned()) {
+                clientSample.framesDropped = data["framesDropped"].get<std::uint64_t>();
+            }
+            if (data.contains("droppedPerSec") && data["droppedPerSec"].is_number()) {
+                clientSample.droppedPerSec = data["droppedPerSec"].get<double>();
+            }
+            if (data.contains("packetsReceived") && data["packetsReceived"].is_number_unsigned()) {
+                clientSample.packetsReceived = data["packetsReceived"].get<std::uint64_t>();
+            }
+            if (data.contains("packetsLost") && data["packetsLost"].is_number_unsigned()) {
+                clientSample.packetsLost = data["packetsLost"].get<std::uint64_t>();
+            }
+            if (data.contains("currentMbps") && data["currentMbps"].is_number()) {
+                clientSample.currentMbps = data["currentMbps"].get<double>();
+            }
+            if (data.contains("audioPacketsReceived") && data["audioPacketsReceived"].is_number_unsigned()) {
+                clientSample.audioPacketsReceived = data["audioPacketsReceived"].get<std::uint64_t>();
+            }
+            if (data.contains("audioPacketsLost") && data["audioPacketsLost"].is_number_unsigned()) {
+                clientSample.audioPacketsLost = data["audioPacketsLost"].get<std::uint64_t>();
+            }
+            if (data.contains("audioJitterMs") && data["audioJitterMs"].is_number()) {
+                clientSample.audioJitterMs = data["audioJitterMs"].get<double>();
+            }
+            if (data.contains("clientFrameIntervalMs") && data["clientFrameIntervalMs"].is_number()) {
+                clientSample.clientFrameIntervalMs = data["clientFrameIntervalMs"].get<double>();
+            }
+            if (data.contains("clientFrameJitterMs") && data["clientFrameJitterMs"].is_number()) {
+                clientSample.clientFrameJitterMs = data["clientFrameJitterMs"].get<double>();
+            }
+
+            std::optional<gateway::telemetry::HostTelemetrySample> hostSample;
+            std::shared_ptr<gateway::moonlight::MoonlightSession> moonlight;
+            {
+                const std::lock_guard lock(session->streamMutex);
+                moonlight = session->moonlightSession;
+            }
+            if (moonlight) {
+                const auto diag = moonlight->streamDiagnostics();
+                if (diag && diag->valid) {
+                    gateway::telemetry::HostTelemetrySample sample;
+                    sample.timestamp = clientSample.timestamp;
+                    sample.hostFps = diag->hostFps;
+                    sample.hostFrameIntervalMs = diag->hostFrameIntervalMs;
+                    sample.hostFrameJitterMs = diag->hostFrameJitterMs;
+                    sample.hostProcessingLatencyMs = diag->hostProcessingLatencyMs;
+                    sample.gatewayLatencyMs = diag->gatewayLatencyMs;
+                    sample.totalHostLatencyMs = diag->totalHostLatencyMs;
+                    sample.totalFrames = diag->totalFrames;
+                    hostSample = sample;
+                }
+            }
+
+            telemetryLogger_.recordTelemetry(session->sessionId, clientSample, hostSample);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
     void sendHostSessionStatus(const std::shared_ptr<Session>& session,
                                std::string_view state,
                                std::optional<std::string> runningAppId = std::nullopt,
@@ -1548,6 +1796,10 @@ private:
             session->sessionId = sessionId;
             session->settings = request.settings;
             session->applicationId = numericApplicationId;
+            session->applicationTitle = applicationTitle;
+            session->clientAddress = session->socket && session->socket->remoteAddress()
+                ? *session->socket->remoteAddress()
+                : "Unknown";
             session->peerConnected = false;
             session->videoTrackOpen = false;
             session->audioTrackOpen = false;
@@ -1985,6 +2237,7 @@ private:
     gateway::managementipc::Result pairingResult_{false, "not-started", "No pairing operation is active"};
     std::atomic<std::uint64_t> nextSessionId_ = 1;
     rtc::WebSocketServer server_;
+    gateway::telemetry::TelemetryLogger telemetryLogger_;
 
 };
 
@@ -2079,7 +2332,11 @@ public:
         : console_(options.hostMode == ProgramHostMode::Console)
     {
         if (options.hostMode == ProgramHostMode::Service) {
-            const auto logPath = *options.dataDirectory / "gateway-service.log";
+            const auto logDir = options.logDirectory.value_or(
+                options.dataDirectory ? (*options.dataDirectory / "logs") : std::filesystem::path("logs"));
+            std::error_code ec;
+            std::filesystem::create_directories(logDir, ec);
+            const auto logPath = logDir / "gateway-service.log";
             const bool writeUtf8Bom = ensureUtf8LogEncoding(logPath);
             file_.open(logPath, std::ios::binary | std::ios::out | std::ios::app);
             if (!file_) {

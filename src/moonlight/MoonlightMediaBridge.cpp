@@ -3,11 +3,14 @@
 #include "media/HevcSpsParser.h"
 #include "moonlight/MoonlightVideoProfile.h"
 
+#include <cmath>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+
+extern "C" std::uint64_t PltGetMicroseconds(void);
 
 namespace gateway {
 
@@ -74,6 +77,12 @@ std::optional<MoonlightVideoDiagnostics> MoonlightMediaBridge::lastVideoFrame() 
 {
     const std::lock_guard lock(diagnosticsMutex_);
     return lastVideoFrame_;
+}
+
+MoonlightStreamDiagnostics MoonlightMediaBridge::currentStreamDiagnostics() const
+{
+    const std::lock_guard lock(diagnosticsMutex_);
+    return currentStreamDiagnostics_;
 }
 
 int MoonlightMediaBridge::videoSetupCallback(int videoFormat,
@@ -355,6 +364,21 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     const auto bytes = videoBytes_.fetch_add(flattened->size(), std::memory_order_relaxed)
         + flattened->size();
     const auto now = std::chrono::steady_clock::now();
+    const auto nowPltUs = PltGetMicroseconds();
+
+    const float hostLatencyMs = decodeUnit->frameHostProcessingLatency > 0
+        ? static_cast<float>(decodeUnit->frameHostProcessingLatency) * 0.1f
+        : 0.0f;
+
+    float gatewayLatencyMs = 0.0f;
+    if (decodeUnit->receiveTimeUs > 0 && nowPltUs >= decodeUnit->receiveTimeUs) {
+        gatewayLatencyMs = static_cast<float>(nowPltUs - decodeUnit->receiveTimeUs) / 1000.0f;
+        // Gateway transit and queue delay is normally 0.5ms - 10ms. Clamp anomalies (>500ms).
+        if (gatewayLatencyMs > 500.0f) {
+            gatewayLatencyMs = 0.0f;
+        }
+    }
+
     bool report = false;
     {
         const std::lock_guard lock(diagnosticsMutex_);
@@ -378,7 +402,90 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             chromaFormatIdc_.load(std::memory_order_acquire) >= 0
                 ? std::optional<int>(chromaFormatIdc_.load(std::memory_order_acquire))
                 : std::nullopt,
+            decodeUnit->frameHostProcessingLatency,
         };
+
+        double intervalMs = 0.0;
+        if (lastSubmitTime_ != std::chrono::steady_clock::time_point{}) {
+            intervalMs = std::chrono::duration<double, std::milli>(now - lastSubmitTime_).count();
+        }
+        lastSubmitTime_ = now;
+
+        if (windowStartTime_ == std::chrono::steady_clock::time_point{}) {
+            windowStartTime_ = now;
+        }
+        windowFrameCount_++;
+        if (intervalMs > 0.0 && intervalMs < 1000.0) {
+            windowIntervalSumMs_ += intervalMs;
+            windowIntervalSqSumMs_ += intervalMs * intervalMs;
+        }
+        if (hostLatencyMs > 0.0f) {
+            windowHostLatencySumMs_ += hostLatencyMs;
+        }
+        windowGatewayLatencySumMs_ += gatewayLatencyMs;
+
+        const auto windowElapsed = std::chrono::duration<double>(now - windowStartTime_).count();
+        if (windowElapsed >= 0.5) {
+            const float hostFps = windowElapsed > 0.0
+                ? static_cast<float>(windowFrameCount_ / windowElapsed)
+                : 0.0f;
+            const float avgIntervalMs = (windowFrameCount_ > 0 && windowIntervalSumMs_ > 0.0)
+                ? static_cast<float>(windowIntervalSumMs_ / windowFrameCount_)
+                : (settings_.fps > 0 ? 1000.0f / static_cast<float>(settings_.fps) : 16.6f);
+
+            float jitterMs = 0.0f;
+            if (windowFrameCount_ > 1) {
+                const double variance = (windowIntervalSqSumMs_ / windowFrameCount_)
+                    - (static_cast<double>(avgIntervalMs) * static_cast<double>(avgIntervalMs));
+                if (variance > 0.0) {
+                    jitterMs = static_cast<float>(std::sqrt(variance));
+                }
+            }
+
+            const float avgHostLatency = (windowFrameCount_ > 0 && windowHostLatencySumMs_ > 0.0)
+                ? static_cast<float>(windowHostLatencySumMs_ / windowFrameCount_)
+                : hostLatencyMs;
+            const float avgGatewayLatency = windowFrameCount_ > 0
+                ? static_cast<float>(windowGatewayLatencySumMs_ / windowFrameCount_)
+                : gatewayLatencyMs;
+
+            const std::string colorName = decodeUnit->colorspace == COLORSPACE_REC_2020
+                ? "Rec.2020"
+                : (decodeUnit->colorspace == COLORSPACE_REC_709 ? "Rec.709" : "Rec.601");
+
+            const int bitDepth = bitDepthLuma_.load(std::memory_order_acquire) > 0
+                ? bitDepthLuma_.load(std::memory_order_acquire)
+                : (settings_.hdr ? 10 : 8);
+
+            currentStreamDiagnostics_ = MoonlightStreamDiagnostics{
+                true,
+                decodeUnit->hdrActive,
+                static_cast<int>(decodeUnit->colorspace),
+                colorName,
+                bitDepth,
+                main10Verified_.load(std::memory_order_acquire),
+                std::string(videoCodecName(settings_.codec)),
+                settings_.width,
+                settings_.height,
+                settings_.fps,
+                hostFps,
+                avgIntervalMs,
+                jitterMs,
+                avgHostLatency,
+                avgGatewayLatency,
+                avgHostLatency + avgGatewayLatency,
+                frames,
+                bytes
+            };
+
+            windowStartTime_ = now;
+            windowFrameCount_ = 0;
+            windowIntervalSumMs_ = 0.0;
+            windowIntervalSqSumMs_ = 0.0;
+            windowHostLatencySumMs_ = 0.0;
+            windowGatewayLatencySumMs_ = 0.0;
+        }
+
         if (now >= nextVideoLog_) {
             nextVideoLog_ = now + std::chrono::seconds(1);
             report = true;
