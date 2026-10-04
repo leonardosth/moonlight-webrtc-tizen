@@ -58,6 +58,15 @@ int main()
         require(h264Configuration->clockRate == 90000
                     && hevcConfiguration->clockRate == 90000,
                 "Video RTP clock is not 90000 Hz");
+
+        auto customMtuPacketizer = gateway::makeVideoRtpPacketizer(
+            gateway::VideoCodec::AV1, av1Configuration, 1360);
+        require(customMtuPacketizer != nullptr,
+                "Custom fragment size AV1 packetizer creation failed");
+        auto defaultMtuPacketizer = gateway::makeVideoRtpPacketizer(
+            gateway::VideoCodec::H264, h264Configuration);
+        require(defaultMtuPacketizer != nullptr,
+                "Default fragment size H.264 packetizer creation failed");
         require(hevcConfiguration->colorSpaceId == 0,
                 "RTP color-space extension was enabled before negotiation");
         gateway::configureHdrRtpColorSpace(hevcConfiguration, 9);

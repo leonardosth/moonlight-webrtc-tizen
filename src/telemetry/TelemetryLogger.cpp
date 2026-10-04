@@ -216,6 +216,8 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 4MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
        << "  - Keyframe Rate Limiter: Active (" << params.idrCooldownMs << "ms cooldown)\n"
+       << "  - NACK History Buffer:  " << params.nackBufferSize << " packets\n"
+       << "  - RTP Fragment Size:    " << params.rtpFragmentSize << " bytes\n"
        << "  - SDP Bandwidth Cap:    " << (params.sdpBandwidthCapKbps > 0 ? ("Enabled (b=AS:" + std::to_string(params.sdpBandwidthCapKbps) + ")") : "Disabled") << "\n"
        << "================================================================================\n";
 

@@ -517,6 +517,7 @@ private:
 
         rtc::Configuration configuration;
         configuration.disableAutoNegotiation = true;
+        configuration.mtu = 1420;
         auto peerConnection = std::make_shared<rtc::PeerConnection>(configuration);
         session->peerConnection = peerConnection;
 
@@ -764,10 +765,11 @@ private:
             VideoRtpClockRate);
         session->videoRtpConfiguration = rtpConfiguration;
         session->videoRtpStartTimestamp = rtpConfiguration->startTimestamp;
+        constexpr std::size_t VideoRtcpNackBufferSize = 4096;
         auto packetizer = gateway::makeVideoRtpPacketizer(
-            settings.codec, rtpConfiguration);
+            settings.codec, rtpConfiguration, gateway::DefaultVideoRtpMaxFragmentSize);
         packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtpConfiguration));
-        packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>());
+        packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(VideoRtcpNackBufferSize));
         packetizer->addToChain(std::make_shared<rtc::PliHandler>(
             [this, weakSession, sessionId] {
             if (const auto currentSession = weakSession.lock();
@@ -971,6 +973,8 @@ private:
             params.rvfc = true;
             params.bufferPool = true;
             params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
+            params.nackBufferSize = 4096;
+            params.rtpFragmentSize = gateway::DefaultVideoRtpMaxFragmentSize;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 

@@ -45,9 +45,12 @@ private:
     std::mutex av1Mutex_;
 };
 
+inline constexpr std::size_t DefaultVideoRtpMaxFragmentSize = 1360;
+
 std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(
     VideoCodec codec,
-    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration);
+    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration,
+    std::size_t maxFragmentSize = DefaultVideoRtpMaxFragmentSize);
 void configureHdrRtpColorSpace(
     const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration,
     int negotiatedExtensionId);

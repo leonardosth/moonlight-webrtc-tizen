@@ -109,6 +109,10 @@ int main()
                 "Log must contain Frame Drop Policy");
         require(logContent.find("Keyframe Rate Limiter: Active (350ms cooldown)") != std::string::npos,
                 "Log must contain Keyframe Rate Limiter");
+        require(logContent.find("NACK History Buffer:  4096 packets") != std::string::npos,
+                "Log must contain NACK History Buffer");
+        require(logContent.find("RTP Fragment Size:    1360 bytes") != std::string::npos,
+                "Log must contain RTP Fragment Size");
         require(logContent.find("SDP Bandwidth Cap:    Enabled (b=AS:50000)") != std::string::npos,
                 "Log must contain SDP Bandwidth Cap");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");

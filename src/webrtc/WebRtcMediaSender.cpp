@@ -63,7 +63,8 @@ void WebRtcMediaSender::sendVideoAccessUnit(VideoCodec codec,
 
 std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(
     VideoCodec codec,
-    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration)
+    const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration,
+    std::size_t maxFragmentSize)
 {
     if (!rtpConfiguration) {
         throw std::invalid_argument("Video RTP configuration must not be null");
@@ -71,13 +72,13 @@ std::shared_ptr<rtc::RtpPacketizer> makeVideoRtpPacketizer(
     switch (codec) {
     case VideoCodec::H264:
         return std::make_shared<rtc::H264RtpPacketizer>(
-            rtc::NalUnit::Separator::StartSequence, rtpConfiguration);
+            rtc::NalUnit::Separator::StartSequence, rtpConfiguration, maxFragmentSize);
     case VideoCodec::HEVC:
         return std::make_shared<rtc::H265RtpPacketizer>(
-            rtc::NalUnit::Separator::StartSequence, rtpConfiguration);
+            rtc::NalUnit::Separator::StartSequence, rtpConfiguration, maxFragmentSize);
     case VideoCodec::AV1:
         return std::make_shared<rtc::AV1RtpPacketizer>(
-            rtc::AV1RtpPacketizer::Packetization::TemporalUnit, rtpConfiguration);
+            rtc::AV1RtpPacketizer::Packetization::TemporalUnit, rtpConfiguration, maxFragmentSize);
     }
     throw std::invalid_argument("Unsupported WebRTC video codec");
 }
