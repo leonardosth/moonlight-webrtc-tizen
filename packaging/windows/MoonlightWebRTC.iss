@@ -11,7 +11,7 @@
 [Setup]
 AppId={{89ABF3E2-D0A7-49C1-8D7C-65B2E9CCCD28}
 AppName=Moonlight WebRTC
-AppVersion=1.9.0-dev
+AppVersion=1.10.0-dev
 AppPublisher=Moonlight WebRTC
 DefaultDirName={autopf}\Moonlight WebRTC
 DefaultGroupName=Moonlight WebRTC

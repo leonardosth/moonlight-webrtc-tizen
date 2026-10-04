@@ -35,7 +35,7 @@ struct SessionParameters {
     std::uint64_t frameDeadlineUs = 0;
     std::uint32_t idrCooldownMs = 500;
     int sdpBandwidthCapKbps = 0;
-    std::size_t nackBufferSize = 4096;
+    std::size_t nackBufferSize = 8192;
     std::size_t rtpFragmentSize = 1360;
     std::string clientIp;
 };

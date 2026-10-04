@@ -1598,7 +1598,7 @@ function createPeerConnection(sessionId) {
           event.receiver.playoutDelayHint = 0;
         }
         if ("jitterBufferTarget" in event.receiver) {
-          event.receiver.jitterBufferTarget = 0;
+          event.receiver.jitterBufferTarget = getJitterBufferTargetMs();
         }
       } catch (e) {}
     }
@@ -1632,17 +1632,30 @@ function createPeerConnection(sessionId) {
   };
 }
 
+function getJitterBufferTargetMs() {
+  const mode = latencyModeSelect ? latencyModeSelect.value : "balanced";
+  if (mode === "lowest_latency") {
+    return 0;
+  }
+  if (mode === "smoothest") {
+    return 33;
+  }
+  // Balanced: 15ms target absorbs typical 7-11ms Wi-Fi jitter and allows NACK retransmissions to arrive
+  return 15;
+}
+
 function applyLowLatencyReceivers() {
   if (!peerConnection || typeof peerConnection.getReceivers !== "function") {
     return;
   }
+  const targetMs = getJitterBufferTargetMs();
   peerConnection.getReceivers().forEach(function (receiver) {
     try {
       if ("playoutDelayHint" in receiver) {
         receiver.playoutDelayHint = 0;
       }
       if ("jitterBufferTarget" in receiver) {
-        receiver.jitterBufferTarget = 0;
+        receiver.jitterBufferTarget = targetMs;
       }
     } catch (e) {}
   });
@@ -3234,6 +3247,7 @@ if (latencyModeSelect) {
   latencyModeSelect.addEventListener("change", function () {
     updateLatencyModeStatus();
     persistCurrentPreferences();
+    applyLowLatencyReceivers();
   });
 }
 

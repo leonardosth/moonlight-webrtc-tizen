@@ -765,7 +765,7 @@ private:
             VideoRtpClockRate);
         session->videoRtpConfiguration = rtpConfiguration;
         session->videoRtpStartTimestamp = rtpConfiguration->startTimestamp;
-        constexpr std::size_t VideoRtcpNackBufferSize = 4096;
+        constexpr std::size_t VideoRtcpNackBufferSize = 8192;
         auto packetizer = gateway::makeVideoRtpPacketizer(
             settings.codec, rtpConfiguration, gateway::DefaultVideoRtpMaxFragmentSize);
         packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtpConfiguration));
@@ -973,7 +973,7 @@ private:
             params.rvfc = true;
             params.bufferPool = true;
             params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
-            params.nackBufferSize = 4096;
+            params.nackBufferSize = 8192;
             params.rtpFragmentSize = gateway::DefaultVideoRtpMaxFragmentSize;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
