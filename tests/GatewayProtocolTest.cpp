@@ -197,6 +197,13 @@ int main()
         invalid.bitrateKbps = 999999;
         require(gateway::validateStreamSettings(invalid).has_value(),
                 "Invalid bitrate was accepted");
+        auto validHighBitrate = settings4k;
+        validHighBitrate.bitrateKbps = 300000;
+        require(!gateway::validateStreamSettings(validHighBitrate),
+                "300 Mbps bitrate was rejected");
+        validHighBitrate.bitrateKbps = 150000;
+        require(!gateway::validateStreamSettings(validHighBitrate),
+                "150 Mbps bitrate was rejected");
         invalid = settings4k;
         invalid.codec = gateway::VideoCodec::H264;
         require(gateway::validateStreamSettings(invalid).has_value(),

@@ -95,7 +95,9 @@ TV never has to infer a resolution/codec combination. Each mode contains `width`
 | 1920x1080 @ 120 | H.264, HEVC, AV1 | Off, On | HEVC | 40000 kbps | Yes |
 
 The selectable bitrates are 10000, 12000, 15000, 20000, 25000, 30000, 40000, 50000,
-60000, 70000, 80000, 90000, and 100000 kbps (10–100 Mbps). HDR defaults to off and is supported
+60000, 70000, 80000, 90000, 100000, 120000, 140000, 160000, 180000, 200000, 250000,
+and 300000 kbps (10–300 Mbps). Values above 80 Mbps require Wi-Fi 6 (5 GHz) or a USB Gigabit
+Ethernet adapter due to the TV's 100 Mbps Fast Ethernet hardware limit. HDR defaults to off and is supported
 when explicitly selected with HEVC or AV1. Audio remains stereo Opus at 48 kHz. Frame rate
 supports 60 fps standard and 120 fps experimental modes. The entire 1440p mode and 120 fps
 modes are experimental.

@@ -43,6 +43,7 @@ const fpsSelect = document.getElementById("fps-select");
 const codecSelect = document.getElementById("codec-select");
 const hdrSelect = document.getElementById("hdr-select");
 const bitrateSelect = document.getElementById("bitrate-select");
+const bitrateStatusElement = document.getElementById("bitrate-status");
 const interpolationSelect = document.getElementById("interpolation-select");
 const interpolationStatusElement = document.getElementById("interpolation-status");
 const interpolationCanvas = document.getElementById("interpolation-canvas");
@@ -967,6 +968,7 @@ function applyCapabilities(message) {
   selectSavedOrDefault(resolutionSelect, savedPreferences.resolution, "1280x720");
   codecSelectionWasIntentional = Boolean(savedPreferences.codec);
   applySelectedVideoMode(savedPreferences);
+  updateBitrateStatus();
   persistCurrentPreferences();
 }
 
@@ -2144,6 +2146,20 @@ function openStreamBitrateSelector() {
   );
 }
 
+function updateBitrateStatus() {
+  if (!bitrateStatusElement || !bitrateSelect) {
+    return;
+  }
+  const kbps = Number(bitrateSelect.value) || 0;
+  if (kbps > 100000) {
+    bitrateStatusElement.textContent = "Exige Wi-Fi 6 (5 GHz) ou adaptador USB Gigabit (porta LAN da TV limita a 100 Mbps)";
+  } else if (kbps > 80000) {
+    bitrateStatusElement.textContent = "Recomenda-se Wi-Fi 5/6 (5 GHz) ou adaptador USB Gigabit para evitar saturação na porta LAN";
+  } else {
+    bitrateStatusElement.textContent = "Compatível com cabo Ethernet 100 Mbps e Wi-Fi";
+  }
+}
+
 function showStreamMenu() {
   updateStreamMenuControls();
   streamMenu.hidden = false;
@@ -3206,7 +3222,10 @@ hdrSelect.addEventListener("change", function () {
   }
   persistCurrentPreferences();
 });
-bitrateSelect.addEventListener("change", persistCurrentPreferences);
+bitrateSelect.addEventListener("change", function () {
+  updateBitrateStatus();
+  persistCurrentPreferences();
+});
 interpolationSelect.addEventListener("change", function () {
   persistCurrentPreferences();
   applyFrameInterpolation();

@@ -160,7 +160,7 @@ private:
     std::chrono::steady_clock::time_point nextVideoLog_{};
     std::chrono::steady_clock::time_point nextAudioLog_{};
     std::chrono::steady_clock::time_point hdrValidationDeadline_{};
-    FlatBufferPool bufferPool_{4, 2 * 1024 * 1024};
+    FlatBufferPool bufferPool_{4, 4 * 1024 * 1024};
     std::mutex logMutex_;
 };
 

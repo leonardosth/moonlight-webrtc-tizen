@@ -105,6 +105,14 @@ inline constexpr std::array SupportedBitratesKbps{
     80000,
     90000,
     100000,
+    120000,
+    140000,
+    150000,
+    160000,
+    180000,
+    200000,
+    250000,
+    300000,
 };
 
 const VideoMode* findVideoMode(int width, int height, int fps = 60);
