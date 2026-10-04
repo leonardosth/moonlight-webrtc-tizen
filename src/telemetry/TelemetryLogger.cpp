@@ -215,6 +215,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 4MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
+       << "  - Keyframe Rate Limiter: Active (" << params.idrCooldownMs << "ms cooldown)\n"
        << "  - SDP Bandwidth Cap:    " << (params.sdpBandwidthCapKbps > 0 ? ("Enabled (b=AS:" + std::to_string(params.sdpBandwidthCapKbps) + ")") : "Disabled") << "\n"
        << "================================================================================\n";
 
@@ -281,6 +282,11 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         if (hostSample->gatewayLateFrameDrops > 0) {
             ss << ", dropGw: " << hostSample->gatewayLateFrameDrops;
         }
+        if (hostSample->keyframeRequestsReceived > 0) {
+            ss << ", idr: " << hostSample->keyframeRequestsReceived << "recv/"
+               << hostSample->keyframeRequestsForwarded << "fwd/"
+               << hostSample->keyframeRequestsThrottled << "throt";
+        }
         ss << ") | ";
     }
 
@@ -333,6 +339,9 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     const auto totalFramesDecoded = lastClient.framesDecoded;
     const auto totalFramesDropped = lastClient.framesDropped;
     const auto totalPacketsLost = lastClient.packetsLost;
+    const auto totalKeyframeRecv = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsReceived : 0;
+    const auto totalKeyframeFwd = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsForwarded : 0;
+    const auto totalKeyframeThrot = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsThrottled : 0;
 
     double dropRate = 0.0;
     if (totalFramesDecoded + totalFramesDropped > 0) {
@@ -352,7 +361,10 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << "  TV Frames Dropped:      " << totalFramesDropped << " ("
        << std::fixed << std::setprecision(2) << dropRate << "% drop rate)\n"
        << "  Gateway Late Drops:     " << totalLateDrops << "\n"
-       << "  Packets Lost (RTP):     " << totalPacketsLost << "\n\n"
+       << "  Packets Lost (RTP):     " << totalPacketsLost << "\n"
+       << "  Keyframe Requests (TV): " << totalKeyframeRecv << "\n"
+       << "  Keyframes Forwarded:    " << totalKeyframeFwd << "\n"
+       << "  Keyframes Throttled:    " << totalKeyframeThrot << " (Suppressed by rate limiter)\n\n"
        << "Performance Metrics Distribution:\n"
        << formatDistributionLine("TV Decode Time", decodeDist, "ms");
     if (!activeSession_->rvfcProcessingSamples.empty()) {

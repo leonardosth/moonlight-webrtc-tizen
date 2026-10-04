@@ -54,6 +54,7 @@ int main()
             params.audioChannels = 2;
             params.latencyMode = "Lowest Latency";
             params.frameDeadlineUs = 25000;
+            params.idrCooldownMs = 350;
             params.sdpBandwidthCapKbps = 50000;
             params.clientIp = "192.168.1.100:50000";
 
@@ -86,6 +87,9 @@ int main()
                 host.totalHostLatencyMs = 2.3f;
                 host.totalFrames = 100 * (i + 1);
                 host.gatewayLateFrameDrops = 2;
+                host.keyframeRequestsReceived = 5;
+                host.keyframeRequestsForwarded = 2;
+                host.keyframeRequestsThrottled = 3;
 
                 logger.recordTelemetry(42, client, host);
             }
@@ -103,6 +107,8 @@ int main()
         require(logContent.find("50000 kbps (50.0 Mbps)") != std::string::npos, "Log must contain bitrate");
         require(logContent.find("Frame Drop Policy:    Active (25ms deadline)") != std::string::npos,
                 "Log must contain Frame Drop Policy");
+        require(logContent.find("Keyframe Rate Limiter: Active (350ms cooldown)") != std::string::npos,
+                "Log must contain Keyframe Rate Limiter");
         require(logContent.find("SDP Bandwidth Cap:    Enabled (b=AS:50000)") != std::string::npos,
                 "Log must contain SDP Bandwidth Cap");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");
@@ -110,7 +116,11 @@ int main()
         require(logContent.find("TV RVFC Processing") != std::string::npos, "Log must contain TV RVFC Processing distribution");
         require(logContent.find("TV RVFC Present Delay") != std::string::npos, "Log must contain TV RVFC Present Delay distribution");
         require(logContent.find("Gateway Late Drops:     2") != std::string::npos, "Log must contain Gateway Late Drops");
+        require(logContent.find("Keyframe Requests (TV): 5") != std::string::npos, "Log must contain Keyframe Requests (TV)");
+        require(logContent.find("Keyframes Forwarded:    2") != std::string::npos, "Log must contain Keyframes Forwarded");
+        require(logContent.find("Keyframes Throttled:    3") != std::string::npos, "Log must contain Keyframes Throttled");
         require(logContent.find("dropGw: 2") != std::string::npos, "Log must contain dropGw in periodic line");
+        require(logContent.find("idr: 5recv/2fwd/3throt") != std::string::npos, "Log must contain idr in periodic line");
         require(logContent.find("p50:") != std::string::npos, "Log must contain p50 metric");
         require(logContent.find("p95:") != std::string::npos, "Log must contain p95 metric");
         require(logContent.find("p99:") != std::string::npos, "Log must contain p99 metric");

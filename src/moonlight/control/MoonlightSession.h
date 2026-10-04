@@ -94,6 +94,7 @@ public:
     void stop();
     void onWebRtcKeyframeRequest();
     [[nodiscard]] std::optional<MoonlightStreamDiagnostics> streamDiagnostics() const;
+    [[nodiscard]] std::uint32_t idrCooldownMs() const noexcept;
 
 private:
     enum class State {

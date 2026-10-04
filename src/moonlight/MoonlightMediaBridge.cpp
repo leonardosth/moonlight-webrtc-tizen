@@ -43,6 +43,18 @@ MoonlightMediaBridge::MoonlightMediaBridge(MediaSender& sender,
     audioCallbacks_.cleanup = &MoonlightMediaBridge::audioCleanupCallback;
     audioCallbacks_.decodeAndPlaySample = &MoonlightMediaBridge::audioSubmitCallback;
     audioCallbacks_.capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
+
+    switch (settings_.latencyMode) {
+    case LatencyMode::LowestLatency:
+        idrCooldownMs_.store(350, std::memory_order_relaxed);
+        break;
+    case LatencyMode::Balanced:
+        idrCooldownMs_.store(500, std::memory_order_relaxed);
+        break;
+    case LatencyMode::Smoothest:
+        idrCooldownMs_.store(750, std::memory_order_relaxed);
+        break;
+    }
 }
 
 MoonlightMediaBridge::~MoonlightMediaBridge()
@@ -65,12 +77,34 @@ AUDIO_RENDERER_CALLBACKS* MoonlightMediaBridge::audioCallbacks()
 
 void MoonlightMediaBridge::onWebRtcKeyframeRequest()
 {
+    keyframeRequestsReceived_.fetch_add(1, std::memory_order_relaxed);
     moonlightIdrRequested_.store(true, std::memory_order_release);
 }
 
 bool MoonlightMediaBridge::hasPendingIdrRequest() const
 {
-    return moonlightIdrRequested_.load(std::memory_order_acquire);
+    return moonlightIdrRequested_.load(std::memory_order_acquire)
+        || pendingIdrDeferred_.load(std::memory_order_acquire);
+}
+
+std::uint32_t MoonlightMediaBridge::idrCooldownMs() const noexcept
+{
+    return idrCooldownMs_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t MoonlightMediaBridge::keyframeRequestsReceived() const noexcept
+{
+    return keyframeRequestsReceived_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t MoonlightMediaBridge::keyframeRequestsForwarded() const noexcept
+{
+    return keyframeRequestsForwarded_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t MoonlightMediaBridge::keyframeRequestsThrottled() const noexcept
+{
+    return keyframeRequestsThrottled_.load(std::memory_order_relaxed);
 }
 
 std::optional<MoonlightVideoDiagnostics> MoonlightMediaBridge::lastVideoFrame() const
@@ -290,6 +324,8 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         if (frameAgeUs > deadlineUs) {
             lateFrameDrops_.fetch_add(1, std::memory_order_relaxed);
             if (!waitingForMoonlightIdr_.exchange(true, std::memory_order_acq_rel)) {
+                lastIdrForwardedTime_ = std::chrono::steady_clock::now();
+                keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
                 std::ostringstream dropMsg;
                 dropMsg << "Late video frame dropped by deadline policy: age="
                         << (frameAgeUs / 1000) << "ms > deadline=" << (deadlineUs / 1000)
@@ -415,9 +451,11 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
 
     sender_.sendVideoAccessUnit(settings_.codec, flattened, decodeUnit->rtpTimestamp);
 
-    if (decodeUnit->frameType == FRAME_TYPE_IDR
-        && waitingForMoonlightIdr_.exchange(false, std::memory_order_acq_rel)) {
-        log("Moonlight IDR frame observed after keyframe request");
+    if (decodeUnit->frameType == FRAME_TYPE_IDR) {
+        pendingIdrDeferred_.store(false, std::memory_order_release);
+        if (waitingForMoonlightIdr_.exchange(false, std::memory_order_acq_rel)) {
+            log("Moonlight IDR frame observed after keyframe request");
+        }
     }
 
     const auto frames = videoFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -542,7 +580,10 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 avgHostLatency + avgGatewayLatency,
                 frames,
                 bytes,
-                lateFrameDrops_.load(std::memory_order_relaxed)
+                lateFrameDrops_.load(std::memory_order_relaxed),
+                keyframeRequestsReceived_.load(std::memory_order_relaxed),
+                keyframeRequestsForwarded_.load(std::memory_order_relaxed),
+                keyframeRequestsThrottled_.load(std::memory_order_relaxed)
             };
 
             windowStartTime_ = now;
@@ -567,10 +608,38 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         log(message.str());
     }
 
+    const auto nowSteady = std::chrono::steady_clock::now();
+    const auto cooldownMs = idrCooldownMs_.load(std::memory_order_relaxed);
+
     if (moonlightIdrRequested_.exchange(false, std::memory_order_acq_rel)) {
-        waitingForMoonlightIdr_.store(true, std::memory_order_release);
-        log("WebRTC keyframe request forwarded to Moonlight");
-        return DR_NEED_IDR;
+        const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
+            : std::chrono::milliseconds::max().count();
+
+        if (elapsedMs < cooldownMs) {
+            keyframeRequestsThrottled_.fetch_add(1, std::memory_order_relaxed);
+            pendingIdrDeferred_.store(true, std::memory_order_release);
+        } else {
+            lastIdrForwardedTime_ = nowSteady;
+            waitingForMoonlightIdr_.store(true, std::memory_order_release);
+            pendingIdrDeferred_.store(false, std::memory_order_release);
+            keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
+            log("WebRTC keyframe request forwarded to Moonlight");
+            return DR_NEED_IDR;
+        }
+    } else if (pendingIdrDeferred_.load(std::memory_order_acquire)) {
+        const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
+            : std::chrono::milliseconds::max().count();
+
+        if (elapsedMs >= cooldownMs) {
+            lastIdrForwardedTime_ = nowSteady;
+            waitingForMoonlightIdr_.store(true, std::memory_order_release);
+            pendingIdrDeferred_.store(false, std::memory_order_release);
+            keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
+            log("Deferred WebRTC keyframe request forwarded to Moonlight after cooldown");
+            return DR_NEED_IDR;
+        }
     }
 
     return DR_OK;

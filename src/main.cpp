@@ -965,6 +965,7 @@ private:
                 break;
             }
             params.frameDropPolicy = params.frameDeadlineUs > 0;
+            params.idrCooldownMs = moonlightSession->idrCooldownMs();
             params.gameMode = true;
             params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             params.rvfc = true;
@@ -1739,6 +1740,9 @@ private:
                     sample.totalHostLatencyMs = diag->totalHostLatencyMs;
                     sample.totalFrames = diag->totalFrames;
                     sample.gatewayLateFrameDrops = diag->lateFrameDrops;
+                    sample.keyframeRequestsReceived = diag->keyframeRequestsReceived;
+                    sample.keyframeRequestsForwarded = diag->keyframeRequestsForwarded;
+                    sample.keyframeRequestsThrottled = diag->keyframeRequestsThrottled;
                     hostSample = sample;
                 }
             }

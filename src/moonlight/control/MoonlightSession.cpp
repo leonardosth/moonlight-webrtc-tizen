@@ -407,6 +407,11 @@ std::optional<MoonlightStreamDiagnostics> MoonlightSession::streamDiagnostics() 
     return std::nullopt;
 }
 
+std::uint32_t MoonlightSession::idrCooldownMs() const noexcept
+{
+    return mediaBridge_ ? mediaBridge_->idrCooldownMs() : 500;
+}
+
 void MoonlightSession::stageStartingCallback(int stage)
 {
     if (auto* session = activeSession_.load(std::memory_order_acquire)) {

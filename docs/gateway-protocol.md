@@ -241,3 +241,16 @@ directly.
 ```
 
 Errors contain no certificate, identity, or pairing secret.
+
+## Keyframe Rate Limiting and IDR Debounce
+
+When the TV client experiences packet loss on wireless or congested networks, WebRTC's decoder fires RTCP PLI/FIR requests.
+To prevent the "Cascading IDR Death Spiral" (where repeated mega-byte keyframes overwhelm the network and trigger even more keyframe requests), the Gateway enforces an active IDR rate limiter:
+
+- **Cooldown per Latency Mode:**
+  - `Lowest Latency`: 350 ms
+  - `Balanced`: 500 ms
+  - `Smoothest`: 750 ms
+- Requests arriving within the cooldown are throttled (`Keyframes Throttled`) and deferred. If an IDR arrives from Sunshine before the cooldown expires, the deferred request is cancelled automatically.
+- If the stream remains corrupted after the cooldown, the deferred request is dispatched on the very next frame.
+

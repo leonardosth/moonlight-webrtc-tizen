@@ -202,6 +202,28 @@ int main()
         require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
                 "Moonlight IDR after keyframe request was not accepted");
 
+        // Immediate second keyframe request within cooldown must be throttled
+        require(bridge.idrCooldownMs() == 500, "Default Balanced mode IDR cooldown should be 500ms");
+        bridge.onWebRtcKeyframeRequest();
+        require(bridge.hasPendingIdrRequest(), "Second IDR request flag was not set");
+        require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
+                "Rapid repeated keyframe request was not throttled by rate limiter");
+        require(bridge.keyframeRequestsThrottled() == 1,
+                "Keyframe throttled counter was not incremented");
+        require(bridge.hasPendingIdrRequest(),
+                "Deferred IDR flag must stay pending while in cooldown");
+
+        // Wait for cooldown to expire (500ms default in Balanced mode)
+        std::this_thread::sleep_for(std::chrono::milliseconds(550));
+        require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_NEED_IDR,
+                "Deferred keyframe request was not forwarded after cooldown expired");
+        require(bridge.keyframeRequestsForwarded() == 2,
+                "Keyframe forwarded counter was not incremented after cooldown");
+        require(!bridge.hasPendingIdrRequest(),
+                "Deferred IDR flag was not consumed after forwarding");
+        require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                "Moonlight IDR after deferred request was not accepted");
+
         // Test frame deadline drop policy in LowestLatency mode
         {
             RecordingMediaSender dropSender;

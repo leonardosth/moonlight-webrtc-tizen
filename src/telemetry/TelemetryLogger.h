@@ -33,6 +33,7 @@ struct SessionParameters {
     bool bufferPool = true;
     bool frameDropPolicy = true;
     std::uint64_t frameDeadlineUs = 0;
+    std::uint32_t idrCooldownMs = 500;
     int sdpBandwidthCapKbps = 0;
     std::string clientIp;
 };
@@ -71,6 +72,9 @@ struct HostTelemetrySample {
     float flattenTimeMs = 0.0f;
     std::uint64_t totalFrames = 0;
     std::uint64_t gatewayLateFrameDrops = 0;
+    std::uint64_t keyframeRequestsReceived = 0;
+    std::uint64_t keyframeRequestsForwarded = 0;
+    std::uint64_t keyframeRequestsThrottled = 0;
 };
 
 struct MetricDistribution {
