@@ -62,6 +62,10 @@ assert.ok(html.includes('id="stream-menu"') && html.includes('id="diagnostics-bu
   "the streaming Back menu and statistics control must remain available");
 assert.ok(html.includes('id="stream-resolution-button"') && html.includes('id="stream-fps-button"') && html.includes('id="stream-bitrate-button"'),
   "the in-stream quick settings controls for resolution, FPS and bitrate must be present in the stream menu");
+assert.ok(html.includes('value="110000">110 Mbps') &&
+          html.includes('value="130000">130 Mbps') &&
+          html.includes('value="135000">135 Mbps'),
+  "granular bitrates between 100 and 150 Mbps must be present in bitrate-select");
 assert.ok(html.includes('id="toast-region"'), "notification region is missing");
 assert.ok(html.includes('src="application-artwork.js"'),
   "the Applications screen must load the Gateway artwork transport");

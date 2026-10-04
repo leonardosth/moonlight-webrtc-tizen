@@ -20,20 +20,21 @@ Copy-Item $confPath "$confPath.bak" -Force
 Write-Host "Backup criado em: $confPath.bak"
 
 $newConfig = @'
+capture = wgcc
 frame_limiter_provider = rtss
 nvenc_vbv_increase = 40
 video_max_batch_size_kb = 32
-nvenc_preset = 5
+nvenc_preset = 6
 headless_mode = enabled
 rtss_frame_limit_type = nvidia reflex
 virtual_display_mode = per_client
 server_cmd = [{"cmd":"bubbles.scr","elevated":false,"name":"Bubbles"}]
+dd_use_sunshine_virtual_display_driver = enabled
+address_family = both
 nvenc_spatial_aq = enabled
 nvenc_temporal_aq = enabled
 dd_configuration_option = ensure_primary
 fec_percentage = 0
-address_family = both
-dd_use_sunshine_virtual_display_driver = enabled
 '@
 
 Set-Content -Path $confPath -Value $newConfig -Encoding utf8
