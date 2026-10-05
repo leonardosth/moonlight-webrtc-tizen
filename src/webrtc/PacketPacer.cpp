@@ -26,9 +26,9 @@ PacingMediaHandler::PacingMediaHandler(PacketPacing pacing,
 {
     if (pacing_ != PacketPacing::Disabled) {
         // Multiplier:
-        // Balanced: 1.50x target bitrate (~11ms send time out of 16.6ms frame budget)
-        // Aggressive: 1.20x target bitrate (~13.8ms send time out of 16.6ms frame budget)
-        const double multiplier = (pacing_ == PacketPacing::Aggressive) ? 1.20 : 1.50;
+        // Balanced: 1.15x target bitrate (~14.5ms send time out of 16.6ms frame budget)
+        // Aggressive: 1.05x target bitrate (~15.8ms send time out of 16.6ms frame budget, near-flat Wi-Fi rate)
+        const double multiplier = (pacing_ == PacketPacing::Aggressive) ? 1.05 : 1.15;
         const double targetBps = static_cast<double>(bitrateKbps_) * 1000.0 * multiplier;
         bytesPerSec_ = static_cast<std::uint64_t>(targetBps / 8.0);
         if (bytesPerSec_ == 0) {
@@ -166,7 +166,7 @@ void PacingMediaHandler::pacingLoop()
             stats_.catchUpEvents++;
         }
 
-        const std::size_t batchSize = catchUp ? 16 : 4;
+        const std::size_t batchSize = catchUp ? 16 : 8;
         std::vector<rtc::message_ptr> batch;
         batch.reserve(batchSize);
         std::size_t batchBytes = 0;
@@ -200,9 +200,8 @@ void PacingMediaHandler::pacingLoop()
             const auto delayUs = std::chrono::microseconds((batchBytes * 1'000'000ULL) / bytesPerSec_);
             const auto targetTime = std::chrono::steady_clock::now() + delayUs;
 
-            if (delayUs >= std::chrono::microseconds(1500)) {
-                std::unique_lock waitLock(mutex_);
-                cv_.wait_for(waitLock, delayUs - std::chrono::microseconds(500), [this] { return !running_; });
+            if (delayUs >= std::chrono::milliseconds(1)) {
+                std::this_thread::sleep_for(delayUs - std::chrono::microseconds(300));
             }
             while (std::chrono::steady_clock::now() < targetTime && running_) {
 #if defined(_WIN32)

@@ -987,10 +987,10 @@ private:
                 params.packetPacing = "Disabled (Immediate Burst)";
                 break;
             case gateway::PacketPacing::Balanced:
-                params.packetPacing = "Balanced (1.50x smooth Wi-Fi budget)";
+                params.packetPacing = "Balanced (1.15x smooth Wi-Fi budget)";
                 break;
             case gateway::PacketPacing::Aggressive:
-                params.packetPacing = "Aggressive (1.20x max stability)";
+                params.packetPacing = "Aggressive (1.05x max stability)";
                 break;
             }
             params.frameDropPolicy = params.frameDeadlineUs > 0;

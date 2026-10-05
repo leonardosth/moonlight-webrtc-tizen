@@ -1600,11 +1600,19 @@ function createPeerConnection(sessionId) {
   peerConnection.ontrack = function (event) {
     if (event.receiver) {
       try {
-        if ("playoutDelayHint" in event.receiver) {
-          event.receiver.playoutDelayHint = 0;
-        }
-        if ("jitterBufferTarget" in event.receiver) {
-          event.receiver.jitterBufferTarget = getJitterBufferTargetMs();
+        if (event.track && event.track.kind === "video") {
+          if ("playoutDelayHint" in event.receiver) {
+            event.receiver.playoutDelayHint = 0;
+          }
+          if ("jitterBufferTarget" in event.receiver) {
+            event.receiver.jitterBufferTarget = getJitterBufferTargetMs();
+          }
+        } else if (event.track && event.track.kind === "audio") {
+          // Audio requires a small resilient buffer (~40ms) to absorb Wi-Fi jitter
+          // without dropouts. PlayoutDelayHint=0 is avoided to prevent audio starvation.
+          if ("jitterBufferTarget" in event.receiver) {
+            event.receiver.jitterBufferTarget = 40;
+          }
         }
       } catch (e) {}
     }
@@ -1657,11 +1665,17 @@ function applyLowLatencyReceivers() {
   const targetMs = getJitterBufferTargetMs();
   peerConnection.getReceivers().forEach(function (receiver) {
     try {
-      if ("playoutDelayHint" in receiver) {
-        receiver.playoutDelayHint = 0;
-      }
-      if ("jitterBufferTarget" in receiver) {
-        receiver.jitterBufferTarget = targetMs;
+      if (receiver.track && receiver.track.kind === "video") {
+        if ("playoutDelayHint" in receiver) {
+          receiver.playoutDelayHint = 0;
+        }
+        if ("jitterBufferTarget" in receiver) {
+          receiver.jitterBufferTarget = targetMs;
+        }
+      } else if (receiver.track && receiver.track.kind === "audio") {
+        if ("jitterBufferTarget" in receiver) {
+          receiver.jitterBufferTarget = 40;
+        }
       }
     } catch (e) {}
   });
