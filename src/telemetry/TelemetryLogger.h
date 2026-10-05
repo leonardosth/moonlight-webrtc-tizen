@@ -29,6 +29,7 @@ struct SessionParameters {
     std::string latencyMode = "Balanced";
     bool gameMode = true;
     bool rtpPlayoutDelay = false;
+    std::string rtpPlayoutDelayRange;
     bool rvfc = true;
     bool bufferPool = true;
     bool frameDropPolicy = true;

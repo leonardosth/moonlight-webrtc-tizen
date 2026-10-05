@@ -93,6 +93,16 @@ int main()
         require(hevcConfiguration->playoutDelayId == 0,
                 "RTP playout-delay extension was not disabled");
 
+        const auto lowestDelay = gateway::playoutDelayForLatencyMode(gateway::LatencyMode::LowestLatency);
+        require(lowestDelay.first == 0 && lowestDelay.second == 0,
+                "Lowest latency mode must set playout delay to min=0ms, max=0ms");
+        const auto balancedDelay = gateway::playoutDelayForLatencyMode(gateway::LatencyMode::Balanced);
+        require(balancedDelay.first == 0 && balancedDelay.second == 3,
+                "Balanced latency mode must set playout delay to min=0ms, max=30ms");
+        const auto smoothestDelay = gateway::playoutDelayForLatencyMode(gateway::LatencyMode::Smoothest);
+        require(smoothestDelay.first == 1 && smoothestDelay.second == 5,
+                "Smoothest latency mode must set playout delay to min=10ms, max=50ms");
+
         rtc::Description::Video h264Description(
             "video", rtc::Description::Direction::SendOnly);
         h264Description.addH264Codec(96);

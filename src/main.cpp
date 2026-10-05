@@ -970,6 +970,12 @@ private:
             params.idrCooldownMs = moonlightSession->idrCooldownMs();
             params.gameMode = true;
             params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
+            if (session->rtpPlayoutDelayNegotiated) {
+                const auto [min10ms, max10ms] =
+                    gateway::playoutDelayForLatencyMode(session->settings.latencyMode);
+                params.rtpPlayoutDelayRange = "min=" + std::to_string(min10ms * 10)
+                    + "ms, max=" + std::to_string(max10ms * 10) + "ms";
+            }
             params.rvfc = true;
             params.bufferPool = true;
             params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
@@ -2212,11 +2218,15 @@ private:
             sdp, gateway::WebRtcPlayoutDelayExtensionUri);
         if (playoutDelayId) {
             session->rtpPlayoutDelayNegotiated = true;
+            const auto [minDelay10ms, maxDelay10ms] =
+                gateway::playoutDelayForLatencyMode(session->settings.latencyMode);
             gateway::configurePlayoutDelayRtp(
-                session->videoRtpConfiguration, *playoutDelayId, 0, 0);
+                session->videoRtpConfiguration, *playoutDelayId, minDelay10ms, maxDelay10ms);
             log("WebRTC RTP playout-delay extension: NEGOTIATED & ACTIVE, id="
                 + std::to_string(*playoutDelayId)
-                + " (min=0ms, max=0ms)");
+                + " (min=" + std::to_string(minDelay10ms * 10)
+                + "ms, max=" + std::to_string(maxDelay10ms * 10) + "ms, mode="
+                + std::string(gateway::latencyModeName(session->settings.latencyMode)) + ")");
         } else {
             session->rtpPlayoutDelayNegotiated = false;
             gateway::disablePlayoutDelayRtp(session->videoRtpConfiguration);

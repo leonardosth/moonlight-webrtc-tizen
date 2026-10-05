@@ -211,7 +211,11 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "Client Address:   " << (params.clientIp.empty() ? "Unknown" : params.clientIp) << "\n"
        << "Pipeline Flags:\n"
        << "  - Samsung Game Mode:    " << (params.gameMode ? "Enabled" : "Disabled") << "\n"
-       << "  - RTP Playout Delay:    " << (params.rtpPlayoutDelay ? "Negotiated & Active" : "Disabled") << "\n"
+       << "  - RTP Playout Delay:    "
+       << (params.rtpPlayoutDelay
+               ? ("Negotiated & Active" + (params.rtpPlayoutDelayRange.empty() ? "" : (" (" + params.rtpPlayoutDelayRange + ")")))
+               : "Disabled")
+       << "\n"
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 4MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"

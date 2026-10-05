@@ -64,4 +64,18 @@ void configurePlayoutDelayRtp(
 void disablePlayoutDelayRtp(
     const std::shared_ptr<rtc::RtpPacketizationConfig>& rtpConfiguration);
 
+inline constexpr std::pair<std::uint16_t, std::uint16_t> playoutDelayForLatencyMode(
+    LatencyMode mode) noexcept
+{
+    switch (mode) {
+    case LatencyMode::LowestLatency:
+        return { 0, 0 }; // 0ms - 0ms (no jitter buffer, immediate display)
+    case LatencyMode::Balanced:
+        return { 0, 3 }; // 0ms - 30ms (allows receiver's 15ms target to smooth Wi-Fi jitter)
+    case LatencyMode::Smoothest:
+        return { 1, 5 }; // 10ms - 50ms (allows receiver's 33ms target for judder-free VSync)
+    }
+    return { 0, 3 };
+}
+
 } // namespace gateway
