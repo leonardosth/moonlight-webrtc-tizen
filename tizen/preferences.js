@@ -9,6 +9,7 @@
     hdr: false,
     bitrateKbps: null,
     latencyMode: "balanced",
+    packetPacing: "balanced",
     frameInterpolation: false,
   });
 
@@ -20,6 +21,7 @@
       hdr: DEFAULTS.hdr,
       bitrateKbps: DEFAULTS.bitrateKbps,
       latencyMode: DEFAULTS.latencyMode,
+      packetPacing: DEFAULTS.packetPacing,
       frameInterpolation: DEFAULTS.frameInterpolation,
     };
   }
@@ -46,6 +48,9 @@
     }
     if (typeof candidate.latencyMode === "string" && (candidate.latencyMode === "lowest_latency" || candidate.latencyMode === "balanced" || candidate.latencyMode === "smoothest")) {
       values.latencyMode = candidate.latencyMode;
+    }
+    if (typeof candidate.packetPacing === "string" && (candidate.packetPacing === "disabled" || candidate.packetPacing === "balanced" || candidate.packetPacing === "aggressive")) {
+      values.packetPacing = candidate.packetPacing;
     }
     if (typeof candidate.frameInterpolation === "boolean") {
       values.frameInterpolation = candidate.frameInterpolation;

@@ -297,7 +297,10 @@ int MoonlightMediaBridge::setupVideo(int videoFormat,
         frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 1.5f), std::memory_order_release);
         break;
     case LatencyMode::Balanced:
-        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 3.0f), std::memory_order_release);
+        // In Balanced mode, network jitter and slight decode queue delays shouldn't cause catastrophic drops and IDR floods.
+        // Relax deadline to ~250ms (15x frame interval) to allow WebRTC jitter buffer to smooth frames,
+        // dropping only if the pipeline has truly stalled.
+        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 15.0f), std::memory_order_release);
         break;
     case LatencyMode::Smoothest:
         frameDeadlineUs_.store(0, std::memory_order_release);

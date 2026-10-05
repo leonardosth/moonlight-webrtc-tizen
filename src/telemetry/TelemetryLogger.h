@@ -27,6 +27,7 @@ struct SessionParameters {
     bool hdr = false;
     int audioChannels = 2;
     std::string latencyMode = "Balanced";
+    std::string packetPacing = "Balanced (1.50x smooth)";
     bool gameMode = true;
     bool rtpPlayoutDelay = false;
     std::string rtpPlayoutDelayRange;

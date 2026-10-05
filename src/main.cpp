@@ -16,6 +16,7 @@
 #include "platform/WakeOnLanAddress.h"
 #include "session/StreamSettings.h"
 #include "telemetry/TelemetryLogger.h"
+#include "webrtc/PacketPacer.h"
 #include "webrtc/SamsungSdp.h"
 #include "webrtc/WebRtcMediaSender.h"
 
@@ -289,6 +290,9 @@ struct PendingCandidate {
 struct Session {
     ~Session()
     {
+        if (videoPacer) {
+            videoPacer->stop();
+        }
         if (inputBridge) {
             inputBridge->shutdown();
         }
@@ -306,6 +310,9 @@ struct Session {
 
     void stopStreaming()
     {
+        if (videoPacer) {
+            videoPacer->stop();
+        }
         requestStreamingStop();
         if (streamingThread.joinable()) {
             streamingThread.join();
@@ -316,6 +323,7 @@ struct Session {
     std::shared_ptr<rtc::PeerConnection> peerConnection;
     std::shared_ptr<rtc::Track> videoTrack;
     std::shared_ptr<rtc::Track> audioTrack;
+    std::shared_ptr<gateway::PacingMediaHandler> videoPacer;
     std::shared_ptr<rtc::DataChannel> controlChannel;
     std::shared_ptr<rtc::DataChannel> gamepadChannel;
     std::shared_ptr<gateway::WebRtcMediaSender> mediaSender;
@@ -795,6 +803,11 @@ private:
                 }
             }
         }));
+        auto pacer = std::make_shared<gateway::PacingMediaHandler>(
+            settings.packetPacing, settings.fps, settings.bitrateKbps,
+            [this](const std::string& msg) { log(msg); });
+        packetizer->addToChain(pacer);
+        session->videoPacer = pacer;
         session->videoTrack->setMediaHandler(packetizer);
 
         session->videoTrack->onOpen([this, weakSession, sessionId] {
@@ -812,6 +825,9 @@ private:
         session->videoTrack->onClosed([this, weakSession, sessionId] {
             if (const auto currentSession = weakSession.lock();
                 currentSession && isCurrentSession(currentSession, sessionId)) {
+                if (currentSession->videoPacer) {
+                    currentSession->videoPacer->stop();
+                }
                 currentSession->requestStreamingStop();
             }
         });
@@ -958,12 +974,23 @@ private:
                 params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 1.5f);
                 break;
             case gateway::LatencyMode::Balanced:
-                params.latencyMode = "Balanced (3.0x deadline drop)";
-                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 3.0f);
+                params.latencyMode = "Balanced (15.0x / 250ms deadline drop)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 15.0f);
                 break;
             case gateway::LatencyMode::Smoothest:
                 params.latencyMode = "Prefer Smoothest Video (drop disabled)";
                 params.frameDeadlineUs = 0;
+                break;
+            }
+            switch (session->settings.packetPacing) {
+            case gateway::PacketPacing::Disabled:
+                params.packetPacing = "Disabled (Immediate Burst)";
+                break;
+            case gateway::PacketPacing::Balanced:
+                params.packetPacing = "Balanced (1.50x smooth Wi-Fi budget)";
+                break;
+            case gateway::PacketPacing::Aggressive:
+                params.packetPacing = "Aggressive (1.20x max stability)";
                 break;
             }
             params.frameDropPolicy = params.frameDeadlineUs > 0;

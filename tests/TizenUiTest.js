@@ -200,7 +200,7 @@ function storage() {
 const persistentStorage = storage();
 const preferences = global.ClientPreferences.create(persistentStorage);
 assert.deepStrictEqual(preferences.load(), {
-  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", frameInterpolation: false,
+  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
 }, "empty storage must use the current defaults");
 preferences.update("resolution", "3840x2160");
 preferences.update("fps", 120);
@@ -208,18 +208,19 @@ preferences.update("codec", "hevc");
 preferences.update("hdr", true);
 preferences.update("bitrateKbps", 50000);
 preferences.update("latencyMode", "lowest_latency");
+preferences.update("packetPacing", "aggressive");
 preferences.update("frameInterpolation", true);
 assert.deepStrictEqual(global.ClientPreferences.create(persistentStorage).load(), {
   resolution: "3840x2160", fps: 120, codec: "hevc", hdr: true, bitrateKbps: 50000,
-  latencyMode: "lowest_latency", frameInterpolation: true,
+  latencyMode: "lowest_latency", packetPacing: "aggressive", frameInterpolation: true,
 }, "saved preferences must survive a simulated application reload");
 assert.strictEqual(preferences.snapshot().fps, 120,
   "FPS must be a persisted selectable preference");
 persistentStorage.setItem(global.ClientPreferences.STORAGE_KEY, JSON.stringify({
-  resolution: 4, fps: "sixty", codec: false, hdr: "true", bitrateKbps: -1, latencyMode: 123, frameInterpolation: "yes",
+  resolution: 4, fps: "sixty", codec: false, hdr: "true", bitrateKbps: -1, latencyMode: 123, packetPacing: 456, frameInterpolation: "yes",
 }));
 assert.deepStrictEqual(global.ClientPreferences.create(persistentStorage).load(), {
-  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", frameInterpolation: false,
+  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
 }, "invalid persisted values must fall back safely");
 assert.strictEqual(global.ClientPreferences.resolveSupported("vp9", ["h264", "hevc", "av1"], "h264"), "h264",
   "unsupported persisted options must fall back to the current supported default");

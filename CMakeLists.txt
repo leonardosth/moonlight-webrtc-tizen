@@ -26,12 +26,16 @@ target_compile_features(opus_file_reader PUBLIC cxx_std_20)
 target_include_directories(opus_file_reader PUBLIC src)
 
 add_library(webrtc_media_sender
+    src/webrtc/PacketPacer.cpp
     src/webrtc/WebRtcMediaSender.cpp
 )
 
 target_compile_features(webrtc_media_sender PUBLIC cxx_std_20)
 target_include_directories(webrtc_media_sender PUBLIC src)
-target_link_libraries(webrtc_media_sender PUBLIC LibDataChannel::LibDataChannel)
+target_link_libraries(webrtc_media_sender PUBLIC
+    LibDataChannel::LibDataChannel
+    $<$<PLATFORM_ID:Windows>:winmm>
+)
 
 add_library(gateway_protocol
     src/gateway/GatewayProtocol.cpp

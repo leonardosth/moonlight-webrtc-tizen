@@ -19,4 +19,6 @@ pkgconf.exe
 scratch_pkgconf.*
 *.obj
 *.log
+log-vibepollo/
+logs-vibepollo/
 GEMINI.md

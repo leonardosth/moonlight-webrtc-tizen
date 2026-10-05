@@ -1,9 +1,12 @@
+#include "webrtc/PacketPacer.h"
 #include "webrtc/WebRtcMediaSender.h"
 
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <rtc/rtc.hpp>
 
@@ -140,6 +143,42 @@ int main()
                     "a=fmtp:96 profile-id=2;tier-flag=0;level-id=123")
                     != std::string::npos,
                 "libdatachannel did not generate the HEVC Main10 fmtp line");
+
+        // Test PacingMediaHandler Disabled mode: passes messages through
+        {
+            gateway::PacingMediaHandler disabledPacer(gateway::PacketPacing::Disabled);
+            rtc::message_vector msgs;
+            for (int i = 0; i < 8; ++i) {
+                msgs.push_back(rtc::make_message(100));
+            }
+            int sendCount = 0;
+            disabledPacer.outgoing(msgs, [&](rtc::message_ptr) { sendCount++; });
+            require(msgs.size() == 8, "Disabled pacer must leave outgoing messages vector intact");
+            require(sendCount == 0, "Disabled pacer must not dispatch through callback");
+        }
+
+        // Test PacingMediaHandler Balanced mode: absorbs into queue and paces
+        {
+            gateway::PacingMediaHandler balancedPacer(gateway::PacketPacing::Balanced, 60, 50000);
+            rtc::message_vector msgs;
+            for (int i = 0; i < 10; ++i) {
+                msgs.push_back(rtc::make_message(200));
+            }
+            std::atomic<int> sentCount = 0;
+            balancedPacer.outgoing(msgs, [&](rtc::message_ptr) { sentCount.fetch_add(1); });
+            require(msgs.empty(), "Balanced pacer must consume outgoing messages vector");
+            require(sentCount.load() >= 4, "Balanced pacer must dispatch initial burst immediately");
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            require(sentCount.load() == 10, "Balanced pacer must dispatch all packets within frame budget");
+
+            const auto stats = balancedPacer.stats();
+            require(stats.totalBursts == 1, "PacingStats totalBursts incorrect");
+            require(stats.totalPacketsImmediate == 4, "PacingStats totalPacketsImmediate incorrect");
+            require(stats.totalPacketsPaced == 6, "PacingStats totalPacketsPaced incorrect");
+            require(stats.maxBurstPackets == 10, "PacingStats maxBurstPackets incorrect");
+            balancedPacer.stop();
+        }
 
         std::cout << "WebRTC media sender tests passed\n";
         return 0;

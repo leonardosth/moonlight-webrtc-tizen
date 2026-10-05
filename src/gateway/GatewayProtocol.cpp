@@ -57,6 +57,12 @@ StreamSettings parseSettings(const Json& message)
                 settings.latencyMode = *mode;
             }
         }
+        if (video.contains("packetPacing") && video.at("packetPacing").is_string()) {
+            const auto pacingName = video.at("packetPacing").get<std::string>();
+            if (const auto pacing = parsePacketPacing(pacingName)) {
+                settings.packetPacing = *pacing;
+            }
+        }
         settings.audioChannels = audio.at("channels").get<int>();
         if (const auto error = validateStreamSettings(settings)) {
             throw ProtocolError("unsupported-settings", *error);
@@ -79,7 +85,8 @@ Json settingsJson(const StreamSettings& settings)
           {"codec", videoCodecName(settings.codec)},
           {"bitrateKbps", settings.bitrateKbps},
           {"hdr", settings.hdr},
-          {"latencyMode", std::string(latencyModeName(settings.latencyMode))}}},
+          {"latencyMode", std::string(latencyModeName(settings.latencyMode))},
+          {"packetPacing", std::string(packetPacingName(settings.packetPacing))}}},
         {"audio", {{"channels", settings.audioChannels}, {"sampleRate", 48000}}},
     };
 }

@@ -60,6 +60,39 @@ inline constexpr std::optional<LatencyMode> parseLatencyMode(std::string_view te
     return std::nullopt;
 }
 
+enum class PacketPacing {
+    Disabled,
+    Balanced,
+    Aggressive,
+};
+
+inline constexpr std::string_view packetPacingName(PacketPacing pacing) noexcept
+{
+    switch (pacing) {
+    case PacketPacing::Disabled:
+        return "disabled";
+    case PacketPacing::Balanced:
+        return "balanced";
+    case PacketPacing::Aggressive:
+        return "aggressive";
+    }
+    return "balanced";
+}
+
+inline constexpr std::optional<PacketPacing> parsePacketPacing(std::string_view text) noexcept
+{
+    if (text == "disabled" || text == "off") {
+        return PacketPacing::Disabled;
+    }
+    if (text == "balanced" || text == "auto") {
+        return PacketPacing::Balanced;
+    }
+    if (text == "aggressive" || text == "stable") {
+        return PacketPacing::Aggressive;
+    }
+    return std::nullopt;
+}
+
 struct StreamSettings {
     int width = 1280;
     int height = 720;
@@ -68,6 +101,7 @@ struct StreamSettings {
     VideoCodec codec = VideoCodec::H264;
     bool hdr = false;
     LatencyMode latencyMode = LatencyMode::Balanced;
+    PacketPacing packetPacing = PacketPacing::Balanced;
     int audioChannels = 2;
 
     bool operator==(const StreamSettings&) const = default;

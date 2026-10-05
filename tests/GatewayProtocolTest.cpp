@@ -333,6 +333,46 @@ int main()
         const auto sessionStatus = gateway::protocol::makeSessionStatus("active", 1, startLowest.settings);
         require(sessionStatus["video"]["latencyMode"] == "lowest_latency",
                 "sessionStatus latencyMode serialization failed");
+        require(sessionStatus["video"]["packetPacing"] == "balanced",
+                "sessionStatus default packetPacing serialization failed");
+
+        const auto pacingDisabledMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"packetPacing", "disabled"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedPacingDisabled = gateway::protocol::parseClientMessage(pacingDisabledMsg);
+        const auto& startPacingDisabled = std::get<gateway::protocol::StartSessionRequest>(parsedPacingDisabled.payload);
+        require(startPacingDisabled.settings.packetPacing == gateway::PacketPacing::Disabled,
+                "disabled packetPacing parsing failed");
+
+        const auto pacingAggressiveMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"packetPacing", "aggressive"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedPacingAggressive = gateway::protocol::parseClientMessage(pacingAggressiveMsg);
+        const auto& startPacingAggressive = std::get<gateway::protocol::StartSessionRequest>(parsedPacingAggressive.payload);
+        require(startPacingAggressive.settings.packetPacing == gateway::PacketPacing::Aggressive,
+                "aggressive packetPacing parsing failed");
 
         requireProtocolError(
             [] {

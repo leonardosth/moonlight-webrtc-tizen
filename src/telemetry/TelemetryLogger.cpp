@@ -217,6 +217,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
                : "Disabled")
        << "\n"
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
+       << "  - Packet Pacing:        " << (params.packetPacing.empty() ? "Disabled" : params.packetPacing) << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 4MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
        << "  - Keyframe Rate Limiter: Active (" << params.idrCooldownMs << "ms cooldown)\n"

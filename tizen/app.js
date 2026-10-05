@@ -49,6 +49,8 @@ const interpolationStatusElement = document.getElementById("interpolation-status
 const interpolationCanvas = document.getElementById("interpolation-canvas");
 const latencyModeSelect = document.getElementById("latency-mode-select");
 const latencyModeStatusElement = document.getElementById("latency-mode-status");
+const packetPacingSelect = document.getElementById("packet-pacing-select");
+const packetPacingStatusElement = document.getElementById("packet-pacing-status");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -894,6 +896,7 @@ function currentPreferenceValues() {
       ? Number(bitrateSelect.value) : null,
     frameInterpolation: interpolationSelect.value === "true",
     latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
+    packetPacing: packetPacingSelect ? packetPacingSelect.value : "balanced",
   };
 }
 
@@ -1370,6 +1373,7 @@ function handleSessionStatus(message) {
             bitrateKbps: selectedSession.bitrateKbps,
             hdr: selectedSession.hdr,
             latencyMode: selectedSession.latencyMode,
+            packetPacing: selectedSession.packetPacing,
           },
           audio: { channels: 2 },
         });
@@ -1452,6 +1456,7 @@ function selectedSettings() {
     bitrateKbps: Number(bitrateSelect.value),
     hdr: hdrSelect.value === "true",
     latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
+    packetPacing: packetPacingSelect ? packetPacingSelect.value : "balanced",
   };
 }
 
@@ -1479,6 +1484,7 @@ function startSelectedSession() {
         bitrateKbps: selectedSession.bitrateKbps,
         hdr: selectedSession.hdr,
         latencyMode: selectedSession.latencyMode,
+        packetPacing: selectedSession.packetPacing,
       },
       audio: { channels: 2 },
     });
@@ -1874,8 +1880,14 @@ function updateInterpolationStatus() {
 
 const LATENCY_MODE_DESCRIPTIONS = {
   lowest_latency: "Aggressive drop of late frames (>1.5× interval). Minimizes latency, but may drop frames on jittery networks.",
-  balanced: "Standard balance (up to 3× interval). Absorbs minor network jitter while keeping latency low and video smooth.",
+  balanced: "Standard balance (up to 250ms margin). Absorbs network jitter while keeping latency low and video smooth without IDR cascades.",
   smoothest: "No frame drops at gateway. Maximizes video smoothness and zero micro-stutter at the expense of temporary latency buildup.",
+};
+
+const PACKET_PACING_DESCRIPTIONS = {
+  disabled: "Disabled (Immediate Burst) — Best for wired Gigabit LAN; sends all frame packets at once with zero pacing delay.",
+  balanced: "Balanced (Smooth Wi-Fi) — Spreads packets across ~50% of the frame budget (~8ms). Prevents router queue overflow and eliminates packet loss bursts.",
+  aggressive: "Aggressive (Maximum Stability) — Evenly distributes packets across ~75% of the frame budget (~12ms). Recommended for congested Wi-Fi.",
 };
 
 function updateLatencyModeStatus() {
@@ -1884,6 +1896,14 @@ function updateLatencyModeStatus() {
   }
   const mode = latencyModeSelect.value;
   latencyModeStatusElement.textContent = LATENCY_MODE_DESCRIPTIONS[mode] || LATENCY_MODE_DESCRIPTIONS.balanced;
+}
+
+function updatePacketPacingStatus() {
+  if (!packetPacingSelect || !packetPacingStatusElement) {
+    return;
+  }
+  const pacing = packetPacingSelect.value;
+  packetPacingStatusElement.textContent = PACKET_PACING_DESCRIPTIONS[pacing] || PACKET_PACING_DESCRIPTIONS.balanced;
 }
 
 function updateTrackCounts() {
@@ -3250,6 +3270,12 @@ if (latencyModeSelect) {
     applyLowLatencyReceivers();
   });
 }
+if (packetPacingSelect) {
+  packetPacingSelect.addEventListener("change", function () {
+    updatePacketPacingStatus();
+    persistCurrentPreferences();
+  });
+}
 
 function updateRemoteTracksForVisibility() {
   const enabled = !document.hidden;
@@ -4179,9 +4205,13 @@ interpolationSelect.value = savedPreferences.frameInterpolation ? "true" : "fals
 if (latencyModeSelect && savedPreferences && savedPreferences.latencyMode) {
   latencyModeSelect.value = savedPreferences.latencyMode;
 }
+if (packetPacingSelect && savedPreferences && savedPreferences.packetPacing) {
+  packetPacingSelect.value = savedPreferences.packetPacing;
+}
 restoreCachedCapabilities();
 updateInterpolationStatus();
 updateLatencyModeStatus();
+updatePacketPacingStatus();
 renderGateways();
 probeSavedGateways();
 

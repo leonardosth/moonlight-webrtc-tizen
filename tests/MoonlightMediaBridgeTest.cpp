@@ -303,6 +303,32 @@ int main()
                     "Smoothest mode must have 0 late frame drops");
         }
 
+        // Test Balanced mode: relaxed deadline (~250ms), frames with 60ms jitter pass through without drops
+        {
+            RecordingMediaSender balancedSender;
+            auto balancedSettings = gateway::defaultStreamSettings();
+            balancedSettings.latencyMode = gateway::LatencyMode::Balanced;
+            balancedSettings.fps = 60;
+            gateway::MoonlightMediaBridge balancedBridge(
+                balancedSender,
+                balancedSettings,
+                [](const std::string&) {});
+            auto* balancedCallbacks = balancedBridge.videoCallbacks();
+            require(balancedCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &balancedBridge, 0) == 0,
+                    "H.264 setup on balancedBridge failed");
+            balancedCallbacks->start();
+            require(balancedBridge.frameDeadlineUs() >= 200000,
+                    "frameDeadlineUs must be relaxed to ~250ms in Balanced mode");
+
+            const auto currentPlt = PltGetMicroseconds();
+            DECODE_UNIT jitteredPframe = pframeUnit;
+            jitteredPframe.receiveTimeUs = currentPlt > 60000 ? (currentPlt - 60000) : 1;
+            require(balancedCallbacks->submitDecodeUnit(&jitteredPframe) == DR_OK,
+                    "Jittered P-frame within relaxed Balanced deadline must return DR_OK");
+            require(balancedBridge.lateFrameDrops() == 0,
+                    "Jittered P-frame in Balanced mode must not increment lateFrameDrops");
+        }
+
         auto* audioCallbacks = bridge.audioCallbacks();
         OPUS_MULTISTREAM_CONFIGURATION unsupportedAudio{};
         unsupportedAudio.sampleRate = 48000;
