@@ -249,6 +249,18 @@ Your gaming PC remains configured the way you left it.
 
 ---
 
+## 📊 Real-time performance and diagnostics overlay
+
+During gameplay, the telemetry HUD provides real-time visibility into every phase of the streaming pipeline:
+
+- **Stream specifications**: Active resolution, rendered FPS, video codec (H.264 / HEVC), **Bit Depth** (8-bit SDR or 10-bit HDR), and **Color Space** (Rec.709 vs Rec.2020).
+- **Host processing breakdown**: Round-trip host processing latency, including discrete metrics for **Host Video Encoding** (Sunshine/NVENC/AMF) and **Gateway Transit** packetization.
+- **Network telemetry**: WebRTC network Round-Trip Time (RTT), video packet loss percentage, and video frame jitter.
+- **Client & display timing**: TV hardware video decoding latency and display frame pacing/render intervals, compensated for Samsung Tizen compositor refresh cycles.
+
+
+---
+
 # Why WebRTC?
 
 A reasonable question is:
@@ -545,11 +557,101 @@ Compare the results with the hashes contained in `SHA256SUMS.txt`.
 
 # Building from source
 
-The project uses C++20, CMake, `moonlight-common-c`, `libdatachannel`, OpenSSL, libcurl, pugixml and Samsung Tizen tooling.
+Moonlight WebRTC consists of two core components:
+1. **Windows Gateway** (`moonlight_webrtc.exe` service and `moonlight_webrtc_tray.exe` tray app) written in C++20 using CMake, `libdatachannel`, OpenSSL, libcurl, and pugixml.
+2. **Samsung Tizen TV Client** (packaged as `.wgt` widgets) written in HTML5/JavaScript with a WebAssembly Wake-on-LAN engine compiled with Samsung's Emscripten SDK.
 
-The Windows Gateway and Samsung TV application have separate packaging pipelines.
+---
 
-The TV package also needs [Samsung's Emscripten SDK](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/download.html) (1.39.4.7) to build its Wake-on-LAN WebAssembly module. `packaging/tizen/build-package.ps1` looks for it in `%USERPROFILE%\samsung-emscripten\emscripten-release-bundle\emsdk`; pass `-EmsdkRoot` or set `SAMSUNG_EMSDK` to use another location.
+## 🛠️ Prerequisites
+
+### Windows Gateway Development
+- **Windows 10 / 11 64-bit**
+- **Visual Studio 2022** (MSVC v143 toolset with C++20 support). You can run `install-build-tools.bat` to install the required Visual Studio Build Tools automatically via `winget`.
+- **CMake 3.25+** and **Git**
+- **vcpkg** (used for dependencies: `libdatachannel`, `openssl`, `curl`, `pugixml`)
+- **Inno Setup 6** (required only if building the Windows installer `MoonlightWebRTC-Setup.exe`)
+
+### Samsung Tizen TV Development
+- **Tizen Studio CLI**: installed at `C:\tizen-studio\tools\ide\bin\tizen.bat` (or available on your `PATH`).
+- **Samsung Certificate Profile**: configured in Tizen Studio (e.g., author and distributor certificates via Samsung Certificate Extension). Check available profiles with:
+  ```cmd
+  tizen security-profiles list
+  ```
+- **Samsung Emscripten SDK (1.39.4.7 fastcomp)**: required to compile the Wake-on-LAN WebAssembly module. Download from [Samsung Developers WebAssembly](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/download.html). The build script looks by default in `%USERPROFILE%\samsung-emscripten\emscripten-release-bundle\emsdk`.
+- **Node.js**: for executing the client automated test suite.
+
+---
+
+## 🏗️ Building the Windows Gateway
+
+### Quick build with batch script
+Run the provided batch script from the repository root:
+```cmd
+build-gateway.bat
+```
+This builds `moonlight_webrtc.exe` using CMake and outputs the binary to `build-vcpkg-release\Release\moonlight_webrtc.exe`.
+
+### Manual CMake build
+```cmd
+cmake -B build-vcpkg-release -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build-vcpkg-release --config Release --target moonlight_webrtc
+```
+
+### Packaging the Windows Installer
+To build the complete Windows installer (`MoonlightWebRTC-Setup.exe`), run:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build-installer.ps1
+```
+The installer will be generated in `dist\windows\MoonlightWebRTC-Setup.exe`.
+
+---
+
+## 📺 Building the Samsung Tizen TV Packages (.wgt)
+
+To compile the Wake-on-LAN WebAssembly module, assemble the web application, and package the signed Tizen widgets, run:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\packaging\tizen\build-package.ps1
+```
+
+If you have multiple security profiles or your Emscripten SDK is in a custom path:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\packaging\tizen\build-package.ps1 -SigningProfile <ProfileName> -EmsdkRoot <PathToEmsdk>
+```
+
+The script produces two packages in `dist\tizen\`:
+- **`MoonlightWebRTC.wgt`**: The main Moonlight client application for Samsung TVs.
+- **`SteamBigPicture.wgt`**: A standalone shortcut launcher for Steam Big Picture.
+
+### Installing onto your Samsung TV
+
+#### Option 1: Via Tizen CLI
+With your Samsung TV in Developer Mode and connected:
+```cmd
+tizen install -n MoonlightWebRTC.wgt -t <TargetDeviceNameOrIP>
+```
+
+#### Option 2: Via Apps2Samsung
+Use [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) with the **Custom WGT** installation option.
+
+---
+
+## 🧪 Running Tests
+
+### Client JavaScript & UI tests
+Run the unit test suite with Node.js:
+```powershell
+Get-ChildItem tests/*.js | ForEach-Object { node $_.FullName }
+```
+
+### Gateway C++ unit tests
+Run the test suite using `ctest`:
+```cmd
+ctest --test-dir build-vcpkg-release -C Release --output-on-failure
+```
+
+---
 
 For GPL-compliant release source, each release also includes `MoonlightWebRTC-Source.tar.gz`, containing the corresponding Moonlight WebRTC source and the exact `moonlight-common-c` revision used by that release.
 

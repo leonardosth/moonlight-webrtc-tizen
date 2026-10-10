@@ -93,6 +93,7 @@ public:
     void start();
     void stop();
     void onWebRtcKeyframeRequest();
+    [[nodiscard]] std::optional<MoonlightStreamDiagnostics> streamDiagnostics() const;
 
 private:
     enum class State {

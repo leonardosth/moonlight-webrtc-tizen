@@ -31,6 +31,28 @@ struct MoonlightVideoDiagnostics {
     std::optional<int> bitDepthLuma;
     std::optional<int> bitDepthChroma;
     std::optional<int> chromaFormatIdc;
+    std::uint16_t frameHostProcessingLatency = 0;
+};
+
+struct MoonlightStreamDiagnostics {
+    bool valid = false;
+    bool hdrActive = false;
+    int colorSpace = 0;
+    std::string colorSpaceName = "unknown";
+    int bitDepth = 8;
+    bool main10Verified = false;
+    std::string codec;
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    float hostFps = 0.0f;
+    float hostFrameIntervalMs = 0.0f;
+    float hostFrameJitterMs = 0.0f;
+    float hostProcessingLatencyMs = 0.0f;
+    float gatewayLatencyMs = 0.0f;
+    float totalHostLatencyMs = 0.0f;
+    std::uint64_t totalFrames = 0;
+    std::uint64_t totalBytes = 0;
 };
 
 class MoonlightMediaBridge {
@@ -53,6 +75,7 @@ public:
     void onWebRtcKeyframeRequest();
     [[nodiscard]] bool hasPendingIdrRequest() const;
     [[nodiscard]] std::optional<MoonlightVideoDiagnostics> lastVideoFrame() const;
+    [[nodiscard]] MoonlightStreamDiagnostics currentStreamDiagnostics() const;
 
 private:
     static int videoSetupCallback(int videoFormat,
@@ -117,6 +140,14 @@ private:
 
     mutable std::mutex diagnosticsMutex_;
     std::optional<MoonlightVideoDiagnostics> lastVideoFrame_;
+    MoonlightStreamDiagnostics currentStreamDiagnostics_{};
+    std::chrono::steady_clock::time_point lastSubmitTime_{};
+    std::chrono::steady_clock::time_point windowStartTime_{};
+    std::uint32_t windowFrameCount_ = 0;
+    double windowIntervalSumMs_ = 0.0;
+    double windowIntervalSqSumMs_ = 0.0;
+    double windowHostLatencySumMs_ = 0.0;
+    double windowGatewayLatencySumMs_ = 0.0;
     std::chrono::steady_clock::time_point nextVideoLog_{};
     std::chrono::steady_clock::time_point nextAudioLog_{};
     std::chrono::steady_clock::time_point hdrValidationDeadline_{};

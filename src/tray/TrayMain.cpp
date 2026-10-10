@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <filesystem>
 
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@ namespace {
 constexpr UINT TrayIconId = 1;
 constexpr UINT ExitCommandId = 100;
 constexpr UINT OpenCommandId = 101;
+constexpr UINT OpenLogsCommandId = 102;
 constexpr UINT TrayCallbackMessage = WM_APP + 1;
 constexpr UINT TrayIconResourceId = 1;
 
@@ -78,6 +80,7 @@ void showMenu(HWND window, TrayState& state)
     AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, sunshine.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, OpenCommandId, L"Open Moonlight WebRTC");
+    AppendMenuW(menu, MF_STRING, OpenLogsCommandId, L"Open Logs Folder");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ExitCommandId, L"Exit");
 
@@ -102,6 +105,19 @@ void showMenu(HWND window, TrayState& state)
                 return management ? management->execute(command)
                                   : gateway::managementipc::Result{false, "unavailable", "Management IPC is unavailable"};
             });
+    } else if (command == OpenLogsCommandId) {
+        wchar_t exePath[MAX_PATH];
+        std::wstring logsDir;
+        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+            std::filesystem::path p(exePath);
+            auto candidate = p.parent_path() / L"logs";
+            std::error_code ec;
+            std::filesystem::create_directories(candidate, ec);
+            logsDir = candidate.wstring();
+        }
+        if (!logsDir.empty()) {
+            ShellExecuteW(nullptr, L"open", logsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
     } else if (command == ExitCommandId) {
         PostMessageW(window, WM_COMMAND, command, 0);
     }
