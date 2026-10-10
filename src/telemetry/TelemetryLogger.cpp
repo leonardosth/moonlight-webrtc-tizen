@@ -220,6 +220,8 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - Packet Pacing:        " << (params.packetPacing.empty() ? "Disabled" : params.packetPacing) << "\n"
        << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 4MB)" : "Disabled") << "\n"
        << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
+       << "  - Sunshine Encryption:  " << (params.sunshineEncryption ? "Enabled (AES-128 GCM)" : "Disabled (Direct Loopback)") << "\n"
+       << "  - Target Jitter Buffer: " << params.videoJitterBufferTargetMs << "ms (Video), " << params.audioJitterBufferTargetMs << "ms (Audio)\n"
        << "  - Keyframe Rate Limiter: Active (" << params.idrCooldownMs << "ms cooldown)\n"
        << "  - NACK History Buffer:  " << params.nackBufferSize << " packets\n"
        << "  - RTP Fragment Size:    " << params.rtpFragmentSize << " bytes\n"

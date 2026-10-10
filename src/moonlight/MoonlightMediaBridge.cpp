@@ -44,16 +44,20 @@ MoonlightMediaBridge::MoonlightMediaBridge(MediaSender& sender,
     audioCallbacks_.decodeAndPlaySample = &MoonlightMediaBridge::audioSubmitCallback;
     audioCallbacks_.capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 
-    switch (settings_.latencyMode) {
-    case LatencyMode::LowestLatency:
-        idrCooldownMs_.store(350, std::memory_order_relaxed);
-        break;
-    case LatencyMode::Balanced:
-        idrCooldownMs_.store(500, std::memory_order_relaxed);
-        break;
-    case LatencyMode::Smoothest:
-        idrCooldownMs_.store(750, std::memory_order_relaxed);
-        break;
+    if (settings_.idrCooldownMs > 0) {
+        idrCooldownMs_.store(static_cast<std::uint32_t>(settings_.idrCooldownMs), std::memory_order_relaxed);
+    } else {
+        switch (settings_.latencyMode) {
+        case LatencyMode::LowestLatency:
+            idrCooldownMs_.store(350, std::memory_order_relaxed);
+            break;
+        case LatencyMode::Balanced:
+            idrCooldownMs_.store(500, std::memory_order_relaxed);
+            break;
+        case LatencyMode::Smoothest:
+            idrCooldownMs_.store(750, std::memory_order_relaxed);
+            break;
+        }
     }
 }
 
@@ -292,18 +296,31 @@ int MoonlightMediaBridge::setupVideo(int videoFormat,
     }
 
     const auto frameIntervalUs = settings_.fps > 0 ? (1'000'000.0f / static_cast<float>(settings_.fps)) : 16667.0f;
-    switch (settings_.latencyMode) {
-    case LatencyMode::LowestLatency:
-        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 1.5f), std::memory_order_release);
+    switch (settings_.frameDropPolicy) {
+    case FrameDropPolicy::Disabled:
+        frameDeadlineUs_.store(0, std::memory_order_release);
         break;
-    case LatencyMode::Balanced:
-        // In Balanced mode, network jitter and slight decode queue delays shouldn't cause catastrophic drops and IDR floods.
-        // Relax deadline to ~250ms (15x frame interval) to allow WebRTC jitter buffer to smooth frames,
-        // dropping only if the pipeline has truly stalled.
+    case FrameDropPolicy::Tolerant:
         frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 15.0f), std::memory_order_release);
         break;
-    case LatencyMode::Smoothest:
-        frameDeadlineUs_.store(0, std::memory_order_release);
+    case FrameDropPolicy::Strict:
+        frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 1.5f), std::memory_order_release);
+        break;
+    case FrameDropPolicy::Auto:
+        switch (settings_.latencyMode) {
+        case LatencyMode::LowestLatency:
+            frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 1.5f), std::memory_order_release);
+            break;
+        case LatencyMode::Balanced:
+            // In Balanced mode, network jitter and slight decode queue delays shouldn't cause catastrophic drops and IDR floods.
+            // Relax deadline to ~250ms (15x frame interval) to allow WebRTC jitter buffer to smooth frames,
+            // dropping only if the pipeline has truly stalled.
+            frameDeadlineUs_.store(static_cast<std::uint64_t>(frameIntervalUs * 15.0f), std::memory_order_release);
+            break;
+        case LatencyMode::Smoothest:
+            frameDeadlineUs_.store(0, std::memory_order_release);
+            break;
+        }
         break;
     }
 

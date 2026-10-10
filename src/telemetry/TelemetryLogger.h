@@ -39,6 +39,10 @@ struct SessionParameters {
     int sdpBandwidthCapKbps = 0;
     std::size_t nackBufferSize = 8192;
     std::size_t rtpFragmentSize = 1360;
+    bool sunshineEncryption = true;
+    int videoJitterBufferTargetMs = 15;
+    int audioJitterBufferTargetMs = 40;
+    std::string frameDropPolicyName = "auto";
     std::string clientIp;
 };
 

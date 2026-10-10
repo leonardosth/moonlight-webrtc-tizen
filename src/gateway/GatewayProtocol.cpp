@@ -63,7 +63,28 @@ StreamSettings parseSettings(const Json& message)
                 settings.packetPacing = *pacing;
             }
         }
+        if (video.contains("sunshineEncryption") && video.at("sunshineEncryption").is_boolean()) {
+            settings.sunshineEncryption = video.at("sunshineEncryption").get<bool>();
+        }
+        if (video.contains("rtpMaxFragmentSize") && video.at("rtpMaxFragmentSize").is_number_integer()) {
+            settings.rtpMaxFragmentSize = video.at("rtpMaxFragmentSize").get<int>();
+        }
+        if (video.contains("videoJitterBufferTargetMs") && video.at("videoJitterBufferTargetMs").is_number_integer()) {
+            settings.videoJitterBufferTargetMs = video.at("videoJitterBufferTargetMs").get<int>();
+        }
+        if (video.contains("idrCooldownMs") && video.at("idrCooldownMs").is_number_integer()) {
+            settings.idrCooldownMs = video.at("idrCooldownMs").get<int>();
+        }
+        if (video.contains("frameDropPolicy") && video.at("frameDropPolicy").is_string()) {
+            const auto policyName = video.at("frameDropPolicy").get<std::string>();
+            if (const auto policy = parseFrameDropPolicy(policyName)) {
+                settings.frameDropPolicy = *policy;
+            }
+        }
         settings.audioChannels = audio.at("channels").get<int>();
+        if (audio.contains("jitterBufferTargetMs") && audio.at("jitterBufferTargetMs").is_number_integer()) {
+            settings.audioJitterBufferTargetMs = audio.at("jitterBufferTargetMs").get<int>();
+        }
         if (const auto error = validateStreamSettings(settings)) {
             throw ProtocolError("unsupported-settings", *error);
         }
@@ -86,8 +107,13 @@ Json settingsJson(const StreamSettings& settings)
           {"bitrateKbps", settings.bitrateKbps},
           {"hdr", settings.hdr},
           {"latencyMode", std::string(latencyModeName(settings.latencyMode))},
-          {"packetPacing", std::string(packetPacingName(settings.packetPacing))}}},
-        {"audio", {{"channels", settings.audioChannels}, {"sampleRate", 48000}}},
+          {"packetPacing", std::string(packetPacingName(settings.packetPacing))},
+          {"sunshineEncryption", settings.sunshineEncryption},
+          {"rtpMaxFragmentSize", settings.rtpMaxFragmentSize},
+          {"videoJitterBufferTargetMs", settings.videoJitterBufferTargetMs},
+          {"idrCooldownMs", settings.idrCooldownMs},
+          {"frameDropPolicy", std::string(frameDropPolicyName(settings.frameDropPolicy))}}},
+        {"audio", {{"channels", settings.audioChannels}, {"sampleRate", 48000}, {"jitterBufferTargetMs", settings.audioJitterBufferTargetMs}}},
     };
 }
 

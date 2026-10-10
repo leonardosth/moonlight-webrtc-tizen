@@ -26,9 +26,15 @@ PacingMediaHandler::PacingMediaHandler(PacketPacing pacing,
 {
     if (pacing_ != PacketPacing::Disabled) {
         // Multiplier:
+        // Fast: 4.0x target bitrate (~4ms delivery window / 25% budget)
         // Balanced: 1.15x target bitrate (~14.5ms send time out of 16.6ms frame budget)
         // Aggressive: 1.05x target bitrate (~15.8ms send time out of 16.6ms frame budget, near-flat Wi-Fi rate)
-        const double multiplier = (pacing_ == PacketPacing::Aggressive) ? 1.05 : 1.15;
+        double multiplier = 1.15;
+        if (pacing_ == PacketPacing::Fast) {
+            multiplier = 4.0;
+        } else if (pacing_ == PacketPacing::Aggressive) {
+            multiplier = 1.05;
+        }
         const double targetBps = static_cast<double>(bitrateKbps_) * 1000.0 * multiplier;
         bytesPerSec_ = static_cast<std::uint64_t>(targetBps / 8.0);
         if (bytesPerSec_ == 0) {
@@ -85,10 +91,10 @@ void PacingMediaHandler::outgoing(rtc::message_vector& messages, const rtc::mess
     }
 
     // Initial burst (Head-of-Line packet delivery):
-    // First 4 packets (SPS/PPS/temporal delimiter and initial slice) are dispatched immediately
-    // so the decoder pipeline has zero initial idle wait.
-    constexpr std::size_t InitialBurstCount = 4;
-    const std::size_t immediateCount = std::min(count, InitialBurstCount);
+    // For Fast pacing, dispatch 8 packets immediately so decoding starts right away.
+    // For Balanced/Aggressive, dispatch 4 packets (SPS/PPS/temporal delimiter and initial slice).
+    const std::size_t initialBurstCount = (pacing_ == PacketPacing::Fast) ? 8 : 4;
+    const std::size_t immediateCount = std::min(count, initialBurstCount);
 
     for (std::size_t i = 0; i < immediateCount; ++i) {
         if (send && messages[i]) {

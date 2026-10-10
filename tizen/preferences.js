@@ -11,6 +11,13 @@
     latencyMode: "balanced",
     packetPacing: "balanced",
     frameInterpolation: false,
+    streamingPreset: "balanced",
+    sunshineEncryption: true,
+    frameDropPolicy: "auto",
+    videoJitterBufferTargetMs: 15,
+    audioJitterBufferTargetMs: 40,
+    rtpMaxFragmentSize: 1360,
+    idrCooldownMs: 500,
   });
 
   function copyDefaults() {
@@ -23,6 +30,13 @@
       latencyMode: DEFAULTS.latencyMode,
       packetPacing: DEFAULTS.packetPacing,
       frameInterpolation: DEFAULTS.frameInterpolation,
+      streamingPreset: DEFAULTS.streamingPreset,
+      sunshineEncryption: DEFAULTS.sunshineEncryption,
+      frameDropPolicy: DEFAULTS.frameDropPolicy,
+      videoJitterBufferTargetMs: DEFAULTS.videoJitterBufferTargetMs,
+      audioJitterBufferTargetMs: DEFAULTS.audioJitterBufferTargetMs,
+      rtpMaxFragmentSize: DEFAULTS.rtpMaxFragmentSize,
+      idrCooldownMs: DEFAULTS.idrCooldownMs,
     };
   }
 
@@ -49,11 +63,32 @@
     if (typeof candidate.latencyMode === "string" && (candidate.latencyMode === "lowest_latency" || candidate.latencyMode === "balanced" || candidate.latencyMode === "smoothest")) {
       values.latencyMode = candidate.latencyMode;
     }
-    if (typeof candidate.packetPacing === "string" && (candidate.packetPacing === "disabled" || candidate.packetPacing === "balanced" || candidate.packetPacing === "aggressive")) {
+    if (typeof candidate.packetPacing === "string" && (candidate.packetPacing === "disabled" || candidate.packetPacing === "fast" || candidate.packetPacing === "balanced" || candidate.packetPacing === "aggressive")) {
       values.packetPacing = candidate.packetPacing;
     }
     if (typeof candidate.frameInterpolation === "boolean") {
       values.frameInterpolation = candidate.frameInterpolation;
+    }
+    if (typeof candidate.streamingPreset === "string" && (candidate.streamingPreset === "custom" || candidate.streamingPreset === "ultra_low_latency" || candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "balanced" || candidate.streamingPreset === "max_stability")) {
+      values.streamingPreset = candidate.streamingPreset;
+    }
+    if (typeof candidate.sunshineEncryption === "boolean") {
+      values.sunshineEncryption = candidate.sunshineEncryption;
+    }
+    if (typeof candidate.frameDropPolicy === "string" && (candidate.frameDropPolicy === "auto" || candidate.frameDropPolicy === "disabled" || candidate.frameDropPolicy === "tolerant" || candidate.frameDropPolicy === "strict")) {
+      values.frameDropPolicy = candidate.frameDropPolicy;
+    }
+    if (Number.isInteger(candidate.videoJitterBufferTargetMs) && candidate.videoJitterBufferTargetMs >= 0) {
+      values.videoJitterBufferTargetMs = candidate.videoJitterBufferTargetMs;
+    }
+    if (Number.isInteger(candidate.audioJitterBufferTargetMs) && candidate.audioJitterBufferTargetMs >= 0) {
+      values.audioJitterBufferTargetMs = candidate.audioJitterBufferTargetMs;
+    }
+    if (Number.isInteger(candidate.rtpMaxFragmentSize) && candidate.rtpMaxFragmentSize >= 1000 && candidate.rtpMaxFragmentSize <= 1460) {
+      values.rtpMaxFragmentSize = candidate.rtpMaxFragmentSize;
+    }
+    if (Number.isInteger(candidate.idrCooldownMs) && candidate.idrCooldownMs >= 100) {
+      values.idrCooldownMs = candidate.idrCooldownMs;
     }
     return values;
   }

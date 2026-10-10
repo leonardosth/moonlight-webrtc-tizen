@@ -91,6 +91,9 @@ std::optional<std::string> validateStreamSettings(const StreamSettings& settings
         == SupportedBitratesKbps.end()) {
         return "Unsupported bitrate";
     }
+    if (settings.rtpMaxFragmentSize < 1000 || settings.rtpMaxFragmentSize > 1460) {
+        return "Unsupported RTP fragment size";
+    }
     return std::nullopt;
 }
 

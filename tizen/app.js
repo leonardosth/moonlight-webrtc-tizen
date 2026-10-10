@@ -51,6 +51,20 @@ const latencyModeSelect = document.getElementById("latency-mode-select");
 const latencyModeStatusElement = document.getElementById("latency-mode-status");
 const packetPacingSelect = document.getElementById("packet-pacing-select");
 const packetPacingStatusElement = document.getElementById("packet-pacing-status");
+const streamingPresetSelect = document.getElementById("streaming-preset-select");
+const streamingPresetStatusElement = document.getElementById("streaming-preset-status");
+const encryptionSelect = document.getElementById("encryption-select");
+const encryptionStatusElement = document.getElementById("encryption-status");
+const frameDropPolicySelect = document.getElementById("frame-drop-policy-select");
+const frameDropPolicyStatusElement = document.getElementById("frame-drop-policy-status");
+const videoJitterBufferSelect = document.getElementById("video-jitter-buffer-select");
+const videoJitterBufferStatusElement = document.getElementById("video-jitter-buffer-status");
+const audioJitterBufferSelect = document.getElementById("audio-jitter-buffer-select");
+const audioJitterBufferStatusElement = document.getElementById("audio-jitter-buffer-status");
+const rtpFragmentSizeSelect = document.getElementById("rtp-fragment-size-select");
+const rtpFragmentSizeStatusElement = document.getElementById("rtp-fragment-size-status");
+const idrCooldownSelect = document.getElementById("idr-cooldown-select");
+const idrCooldownStatusElement = document.getElementById("idr-cooldown-status");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -897,6 +911,13 @@ function currentPreferenceValues() {
     frameInterpolation: interpolationSelect.value === "true",
     latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
     packetPacing: packetPacingSelect ? packetPacingSelect.value : "balanced",
+    streamingPreset: streamingPresetSelect ? streamingPresetSelect.value : "balanced",
+    sunshineEncryption: encryptionSelect ? (encryptionSelect.value === "true") : true,
+    frameDropPolicy: frameDropPolicySelect ? frameDropPolicySelect.value : "auto",
+    videoJitterBufferTargetMs: videoJitterBufferSelect ? Number(videoJitterBufferSelect.value) : 15,
+    audioJitterBufferTargetMs: audioJitterBufferSelect ? Number(audioJitterBufferSelect.value) : 40,
+    rtpMaxFragmentSize: rtpFragmentSizeSelect ? Number(rtpFragmentSizeSelect.value) : 1360,
+    idrCooldownMs: idrCooldownSelect ? Number(idrCooldownSelect.value) : 500,
   };
 }
 
@@ -1374,8 +1395,16 @@ function handleSessionStatus(message) {
             hdr: selectedSession.hdr,
             latencyMode: selectedSession.latencyMode,
             packetPacing: selectedSession.packetPacing,
+            sunshineEncryption: selectedSession.sunshineEncryption,
+            rtpMaxFragmentSize: selectedSession.rtpMaxFragmentSize,
+            videoJitterBufferTargetMs: selectedSession.videoJitterBufferTargetMs,
+            frameDropPolicy: selectedSession.frameDropPolicy,
+            idrCooldownMs: selectedSession.idrCooldownMs,
           },
-          audio: { channels: 2 },
+          audio: {
+            channels: 2,
+            jitterBufferTargetMs: selectedSession.audioJitterBufferTargetMs,
+          },
         });
         setHomeMessage("Retrying with " + codecDisplayName(fallbackCodec) + "...", false);
       } catch (retryError) {
@@ -1457,6 +1486,13 @@ function selectedSettings() {
     hdr: hdrSelect.value === "true",
     latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
     packetPacing: packetPacingSelect ? packetPacingSelect.value : "balanced",
+    streamingPreset: streamingPresetSelect ? streamingPresetSelect.value : "balanced",
+    sunshineEncryption: encryptionSelect ? (encryptionSelect.value === "true") : true,
+    frameDropPolicy: frameDropPolicySelect ? frameDropPolicySelect.value : "auto",
+    videoJitterBufferTargetMs: videoJitterBufferSelect ? Number(videoJitterBufferSelect.value) : 15,
+    audioJitterBufferTargetMs: audioJitterBufferSelect ? Number(audioJitterBufferSelect.value) : 40,
+    rtpMaxFragmentSize: rtpFragmentSizeSelect ? Number(rtpFragmentSizeSelect.value) : 1360,
+    idrCooldownMs: idrCooldownSelect ? Number(idrCooldownSelect.value) : 500,
   };
 }
 
@@ -1485,8 +1521,16 @@ function startSelectedSession() {
         hdr: selectedSession.hdr,
         latencyMode: selectedSession.latencyMode,
         packetPacing: selectedSession.packetPacing,
+        sunshineEncryption: selectedSession.sunshineEncryption,
+        rtpMaxFragmentSize: selectedSession.rtpMaxFragmentSize,
+        videoJitterBufferTargetMs: selectedSession.videoJitterBufferTargetMs,
+        frameDropPolicy: selectedSession.frameDropPolicy,
+        idrCooldownMs: selectedSession.idrCooldownMs,
       },
-      audio: { channels: 2 },
+      audio: {
+        channels: 2,
+        jitterBufferTargetMs: selectedSession.audioJitterBufferTargetMs,
+      },
     });
     setHomeMessage("Starting " + selectedSession.appTitle + "...", false);
   } catch (error) {
@@ -1598,6 +1642,11 @@ function createPeerConnection(sessionId) {
   };
 
   peerConnection.ontrack = function (event) {
+    if (event.track && event.track.kind === "video") {
+      try {
+        event.track.contentHint = "motion";
+      } catch (e) {}
+    }
     if (event.receiver) {
       try {
         if (event.track && event.track.kind === "video") {
@@ -1608,10 +1657,8 @@ function createPeerConnection(sessionId) {
             event.receiver.jitterBufferTarget = getJitterBufferTargetMs();
           }
         } else if (event.track && event.track.kind === "audio") {
-          // Audio requires a small resilient buffer (~40ms) to absorb Wi-Fi jitter
-          // without dropouts. PlayoutDelayHint=0 is avoided to prevent audio starvation.
           if ("jitterBufferTarget" in event.receiver) {
-            event.receiver.jitterBufferTarget = 40;
+            event.receiver.jitterBufferTarget = getAudioJitterBufferTargetMs();
           }
         }
       } catch (e) {}
@@ -1647,6 +1694,12 @@ function createPeerConnection(sessionId) {
 }
 
 function getJitterBufferTargetMs() {
+  if (videoJitterBufferSelect) {
+    const val = Number(videoJitterBufferSelect.value);
+    if (!isNaN(val) && val >= 0) {
+      return val;
+    }
+  }
   const mode = latencyModeSelect ? latencyModeSelect.value : "balanced";
   if (mode === "lowest_latency") {
     return 0;
@@ -1658,11 +1711,22 @@ function getJitterBufferTargetMs() {
   return 15;
 }
 
+function getAudioJitterBufferTargetMs() {
+  if (audioJitterBufferSelect) {
+    const val = Number(audioJitterBufferSelect.value);
+    if (!isNaN(val) && val >= 0) {
+      return val;
+    }
+  }
+  return 40;
+}
+
 function applyLowLatencyReceivers() {
   if (!peerConnection || typeof peerConnection.getReceivers !== "function") {
     return;
   }
   const targetMs = getJitterBufferTargetMs();
+  const audioTargetMs = getAudioJitterBufferTargetMs();
   peerConnection.getReceivers().forEach(function (receiver) {
     try {
       if (receiver.track && receiver.track.kind === "video") {
@@ -1674,7 +1738,7 @@ function applyLowLatencyReceivers() {
         }
       } else if (receiver.track && receiver.track.kind === "audio") {
         if ("jitterBufferTarget" in receiver) {
-          receiver.jitterBufferTarget = 40;
+          receiver.jitterBufferTarget = audioTargetMs;
         }
       }
     } catch (e) {}
@@ -1899,9 +1963,55 @@ const LATENCY_MODE_DESCRIPTIONS = {
 };
 
 const PACKET_PACING_DESCRIPTIONS = {
-  disabled: "Disabled (Immediate Burst) — Best for wired Gigabit LAN; sends all frame packets at once with zero pacing delay.",
-  balanced: "Balanced (Smooth Wi-Fi) — Spreads packets across ~50% of the frame budget (~8ms). Prevents router queue overflow and eliminates packet loss bursts.",
-  aggressive: "Aggressive (Maximum Stability) — Evenly distributes packets across ~75% of the frame budget (~12ms). Recommended for congested Wi-Fi.",
+  disabled: "Disabled (Immediate Burst) — Despeja todo o quadro instantaneamente; ideal para cabo Gigabit LAN.",
+  fast: "Fast (4x delivery window / ~4ms) — Envia pacotes 4x acelerados adiantando o decode de fatias sem congestionar a TV.",
+  balanced: "Balanced (Smooth Wi-Fi) — Distribui pacotes suavemente ao longo de ~50% do quadro (~8ms) para prevenir perdas.",
+  aggressive: "Aggressive (Maximum Stability) — Espalhamento máximo ao longo de ~75% do quadro (~12ms) para Wi-Fi congestionado.",
+};
+
+const STREAMING_PRESET_DESCRIPTIONS = {
+  custom: "Custom — Ajustes manuais de entrega, criptografia, buffers e políticas de descarte.",
+  ultra_low_latency: "Ultra-Low Latency — Entrega acelerada (~4ms), loopback sem criptografia, zero buffer e sem drops para cabo LAN.",
+  fast_wifi: "Fast Wi-Fi — Pacing rápido, sem criptografia em LAN, buffer de 8ms e descarte tolerante para Wi-Fi 5/6 GHz.",
+  balanced: "Balanced — Configuração padrão recomendada: criptografia ativa, pacer suave e buffer de 15ms.",
+  max_stability: "Max Stability — Pacing espalhado, buffer resiliente de 30ms/80ms e pacotes de 1200B contra perda severa.",
+};
+
+const ENCRYPTION_DESCRIPTIONS = {
+  false: "Disabled (Loopback / Baixa Latência) — Economiza CPU e reduz latência eliminando a dupla cifragem AES-128 em rede local confiável.",
+  true: "Enabled (AES-128 GCM Padrão) — Criptografia padrão Moonlight mantida entre Gateway e host Sunshine.",
+};
+
+const FRAME_DROP_POLICY_DESCRIPTIONS = {
+  auto: "Auto — Segue o Modo de Latência (Lowest Latency descarta após 1.5x frame; Balanced tolera até ~250ms).",
+  disabled: "Disabled (Nunca descartar frames) — O Gateway nunca descarta quadros atrasados. Prioriza entrega contínua sem interrupções.",
+  tolerant: "Tolerant (Descarte suave em ~250ms) — Descarta frames apenas se houver atraso grave na rede, absorvendo flutuações temporárias.",
+  strict: "Strict (Descarte imediato em 1.5x frame) — Descarta quadros atrasados agressivamente para priorizar latência mínima absoluta.",
+};
+
+const VIDEO_JITTER_BUFFER_DESCRIPTIONS = {
+  0: "0 ms (Zero Delay / Mínima Latência) — Renderização imediata na TV sem buffer. Exige rede muito estável para evitar micro-pausas.",
+  8: "8 ms (Fast Wi-Fi) — Pequena margem de segurança para absorver jitter de pacotes sem penalizar o tempo de resposta.",
+  15: "15 ms (Balanced) — Padrão WebRTC recomendado. Absorve flutuações típicas de Wi-Fi e retransmissões NACK.",
+  30: "30 ms (Smooth / Estável) — Foco em fluidez absoluta de vídeo eliminando micro-stutters em conexões com ruído.",
+};
+
+const AUDIO_JITTER_BUFFER_DESCRIPTIONS = {
+  15: "15 ms (Low Latency) — Reduz o atraso auditivo ao mínimo para resposta imediata aos efeitos do jogo.",
+  40: "40 ms (Balanced / Sem Estalos) — Padrão recomendado para áudio perfeito sem estalos ou interrupções causados por jitter.",
+  80: "80 ms (Smooth / Estável) — Buffer resiliente para reprodução contínua mesmo em Wi-Fi com alta variabilidade.",
+};
+
+const RTP_FRAGMENT_SIZE_DESCRIPTIONS = {
+  1200: "1200 bytes (Safe Wi-Fi / MTU Seguro) — Pacotes menores que evitam fragmentação IP em redes com MTU reduzido ou VPN.",
+  1360: "1360 bytes (Padrão WebRTC) — Tamanho equilibrado para a maioria das redes domésticas e roteadores modernos.",
+  1420: "1420 bytes (Max Throughput / Cabo LAN) — Carga útil máxima por pacote, reduzindo overhead de rede e interrupções de CPU.",
+};
+
+const IDR_COOLDOWN_DESCRIPTIONS = {
+  250: "250 ms (Recuperação Rápida) — Permite pedir quadros-chave à GPU mais rápido após perdas graves para restaurar a imagem.",
+  500: "500 ms (Equilibrado) — Intervalo padrão que previne picos de carga no encoder NVENC/QuickSync da placa de vídeo.",
+  750: "750 ms (Conservador / Poupa GPU) — Protege o framerate do jogo em PCs com placas de vídeo de entrada.",
 };
 
 function updateLatencyModeStatus() {
@@ -1918,6 +2028,95 @@ function updatePacketPacingStatus() {
   }
   const pacing = packetPacingSelect.value;
   packetPacingStatusElement.textContent = PACKET_PACING_DESCRIPTIONS[pacing] || PACKET_PACING_DESCRIPTIONS.balanced;
+}
+
+function updateStreamingPresetStatus() {
+  if (streamingPresetSelect && streamingPresetStatusElement) {
+    streamingPresetStatusElement.textContent = STREAMING_PRESET_DESCRIPTIONS[streamingPresetSelect.value] || STREAMING_PRESET_DESCRIPTIONS.balanced;
+  }
+}
+
+function updateEncryptionStatus() {
+  if (encryptionSelect && encryptionStatusElement) {
+    encryptionStatusElement.textContent = ENCRYPTION_DESCRIPTIONS[encryptionSelect.value] || ENCRYPTION_DESCRIPTIONS["true"];
+  }
+}
+
+function updateFrameDropPolicyStatus() {
+  if (frameDropPolicySelect && frameDropPolicyStatusElement) {
+    frameDropPolicyStatusElement.textContent = FRAME_DROP_POLICY_DESCRIPTIONS[frameDropPolicySelect.value] || FRAME_DROP_POLICY_DESCRIPTIONS.auto;
+  }
+}
+
+function updateVideoJitterBufferStatus() {
+  if (videoJitterBufferSelect && videoJitterBufferStatusElement) {
+    videoJitterBufferStatusElement.textContent = VIDEO_JITTER_BUFFER_DESCRIPTIONS[videoJitterBufferSelect.value] || VIDEO_JITTER_BUFFER_DESCRIPTIONS["15"];
+  }
+}
+
+function updateAudioJitterBufferStatus() {
+  if (audioJitterBufferSelect && audioJitterBufferStatusElement) {
+    audioJitterBufferStatusElement.textContent = AUDIO_JITTER_BUFFER_DESCRIPTIONS[audioJitterBufferSelect.value] || AUDIO_JITTER_BUFFER_DESCRIPTIONS["40"];
+  }
+}
+
+function updateRtpFragmentSizeStatus() {
+  if (rtpFragmentSizeSelect && rtpFragmentSizeStatusElement) {
+    rtpFragmentSizeStatusElement.textContent = RTP_FRAGMENT_SIZE_DESCRIPTIONS[rtpFragmentSizeSelect.value] || RTP_FRAGMENT_SIZE_DESCRIPTIONS["1360"];
+  }
+}
+
+function updateIdrCooldownStatus() {
+  if (idrCooldownSelect && idrCooldownStatusElement) {
+    idrCooldownStatusElement.textContent = IDR_COOLDOWN_DESCRIPTIONS[idrCooldownSelect.value] || IDR_COOLDOWN_DESCRIPTIONS["500"];
+  }
+}
+
+function applyStreamingPreset(preset) {
+  if (!preset || preset === "custom") {
+    return;
+  }
+  if (preset === "ultra_low_latency") {
+    if (packetPacingSelect) packetPacingSelect.value = "fast";
+    if (encryptionSelect) encryptionSelect.value = "false";
+    if (frameDropPolicySelect) frameDropPolicySelect.value = "disabled";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "0";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "15";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1420";
+    if (idrCooldownSelect) idrCooldownSelect.value = "250";
+  } else if (preset === "fast_wifi") {
+    if (packetPacingSelect) packetPacingSelect.value = "fast";
+    if (encryptionSelect) encryptionSelect.value = "false";
+    if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "8";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
+    if (idrCooldownSelect) idrCooldownSelect.value = "500";
+  } else if (preset === "balanced") {
+    if (packetPacingSelect) packetPacingSelect.value = "balanced";
+    if (encryptionSelect) encryptionSelect.value = "true";
+    if (frameDropPolicySelect) frameDropPolicySelect.value = "auto";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "15";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
+    if (idrCooldownSelect) idrCooldownSelect.value = "500";
+  } else if (preset === "max_stability") {
+    if (packetPacingSelect) packetPacingSelect.value = "aggressive";
+    if (encryptionSelect) encryptionSelect.value = "true";
+    if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "30";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "80";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
+    if (idrCooldownSelect) idrCooldownSelect.value = "750";
+  }
+  updatePacketPacingStatus();
+  updateEncryptionStatus();
+  updateFrameDropPolicyStatus();
+  updateVideoJitterBufferStatus();
+  updateAudioJitterBufferStatus();
+  updateRtpFragmentSizeStatus();
+  updateIdrCooldownStatus();
+  applyLowLatencyReceivers();
 }
 
 function updateTrackCounts() {
@@ -3286,7 +3485,80 @@ if (latencyModeSelect) {
 }
 if (packetPacingSelect) {
   packetPacingSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
     updatePacketPacingStatus();
+    persistCurrentPreferences();
+  });
+}
+if (streamingPresetSelect) {
+  streamingPresetSelect.addEventListener("change", function () {
+    applyStreamingPreset(streamingPresetSelect.value);
+    updateStreamingPresetStatus();
+    persistCurrentPreferences();
+  });
+}
+if (encryptionSelect) {
+  encryptionSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateEncryptionStatus();
+    persistCurrentPreferences();
+  });
+}
+if (frameDropPolicySelect) {
+  frameDropPolicySelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateFrameDropPolicyStatus();
+    persistCurrentPreferences();
+  });
+}
+if (videoJitterBufferSelect) {
+  videoJitterBufferSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateVideoJitterBufferStatus();
+    persistCurrentPreferences();
+    applyLowLatencyReceivers();
+  });
+}
+if (audioJitterBufferSelect) {
+  audioJitterBufferSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateAudioJitterBufferStatus();
+    persistCurrentPreferences();
+    applyLowLatencyReceivers();
+  });
+}
+if (rtpFragmentSizeSelect) {
+  rtpFragmentSizeSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateRtpFragmentSizeStatus();
+    persistCurrentPreferences();
+  });
+}
+if (idrCooldownSelect) {
+  idrCooldownSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateIdrCooldownStatus();
     persistCurrentPreferences();
   });
 }
@@ -4222,10 +4494,38 @@ if (latencyModeSelect && savedPreferences && savedPreferences.latencyMode) {
 if (packetPacingSelect && savedPreferences && savedPreferences.packetPacing) {
   packetPacingSelect.value = savedPreferences.packetPacing;
 }
+if (streamingPresetSelect && savedPreferences && savedPreferences.streamingPreset) {
+  streamingPresetSelect.value = savedPreferences.streamingPreset;
+}
+if (encryptionSelect && savedPreferences && typeof savedPreferences.sunshineEncryption === "boolean") {
+  encryptionSelect.value = savedPreferences.sunshineEncryption ? "true" : "false";
+}
+if (frameDropPolicySelect && savedPreferences && savedPreferences.frameDropPolicy) {
+  frameDropPolicySelect.value = savedPreferences.frameDropPolicy;
+}
+if (videoJitterBufferSelect && savedPreferences && typeof savedPreferences.videoJitterBufferTargetMs === "number") {
+  videoJitterBufferSelect.value = String(savedPreferences.videoJitterBufferTargetMs);
+}
+if (audioJitterBufferSelect && savedPreferences && typeof savedPreferences.audioJitterBufferTargetMs === "number") {
+  audioJitterBufferSelect.value = String(savedPreferences.audioJitterBufferTargetMs);
+}
+if (rtpFragmentSizeSelect && savedPreferences && typeof savedPreferences.rtpMaxFragmentSize === "number") {
+  rtpFragmentSizeSelect.value = String(savedPreferences.rtpMaxFragmentSize);
+}
+if (idrCooldownSelect && savedPreferences && typeof savedPreferences.idrCooldownMs === "number") {
+  idrCooldownSelect.value = String(savedPreferences.idrCooldownMs);
+}
 restoreCachedCapabilities();
 updateInterpolationStatus();
 updateLatencyModeStatus();
 updatePacketPacingStatus();
+updateStreamingPresetStatus();
+updateEncryptionStatus();
+updateFrameDropPolicyStatus();
+updateVideoJitterBufferStatus();
+updateAudioJitterBufferStatus();
+updateRtpFragmentSizeStatus();
+updateIdrCooldownStatus();
 renderGateways();
 probeSavedGateways();
 

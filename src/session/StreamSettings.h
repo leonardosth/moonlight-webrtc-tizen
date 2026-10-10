@@ -62,6 +62,7 @@ inline constexpr std::optional<LatencyMode> parseLatencyMode(std::string_view te
 
 enum class PacketPacing {
     Disabled,
+    Fast,
     Balanced,
     Aggressive,
 };
@@ -71,6 +72,8 @@ inline constexpr std::string_view packetPacingName(PacketPacing pacing) noexcept
     switch (pacing) {
     case PacketPacing::Disabled:
         return "disabled";
+    case PacketPacing::Fast:
+        return "fast";
     case PacketPacing::Balanced:
         return "balanced";
     case PacketPacing::Aggressive:
@@ -81,14 +84,56 @@ inline constexpr std::string_view packetPacingName(PacketPacing pacing) noexcept
 
 inline constexpr std::optional<PacketPacing> parsePacketPacing(std::string_view text) noexcept
 {
-    if (text == "disabled" || text == "off") {
+    if (text == "disabled" || text == "off" || text == "immediate") {
         return PacketPacing::Disabled;
     }
-    if (text == "balanced" || text == "auto") {
+    if (text == "fast" || text == "25%") {
+        return PacketPacing::Fast;
+    }
+    if (text == "balanced" || text == "auto" || text == "50%") {
         return PacketPacing::Balanced;
     }
-    if (text == "aggressive" || text == "stable") {
+    if (text == "aggressive" || text == "stable" || text == "spread" || text == "85%") {
         return PacketPacing::Aggressive;
+    }
+    return std::nullopt;
+}
+
+enum class FrameDropPolicy {
+    Auto,
+    Disabled,
+    Tolerant,
+    Strict,
+};
+
+inline constexpr std::string_view frameDropPolicyName(FrameDropPolicy policy) noexcept
+{
+    switch (policy) {
+    case FrameDropPolicy::Auto:
+        return "auto";
+    case FrameDropPolicy::Disabled:
+        return "disabled";
+    case FrameDropPolicy::Tolerant:
+        return "tolerant";
+    case FrameDropPolicy::Strict:
+        return "strict";
+    }
+    return "auto";
+}
+
+inline constexpr std::optional<FrameDropPolicy> parseFrameDropPolicy(std::string_view text) noexcept
+{
+    if (text == "auto") {
+        return FrameDropPolicy::Auto;
+    }
+    if (text == "disabled" || text == "none" || text == "off") {
+        return FrameDropPolicy::Disabled;
+    }
+    if (text == "tolerant" || text == "relaxed") {
+        return FrameDropPolicy::Tolerant;
+    }
+    if (text == "strict" || text == "aggressive") {
+        return FrameDropPolicy::Strict;
     }
     return std::nullopt;
 }
@@ -103,6 +148,12 @@ struct StreamSettings {
     LatencyMode latencyMode = LatencyMode::Balanced;
     PacketPacing packetPacing = PacketPacing::Balanced;
     int audioChannels = 2;
+    bool sunshineEncryption = true;
+    int rtpMaxFragmentSize = 1360;
+    int videoJitterBufferTargetMs = 15;
+    int audioJitterBufferTargetMs = 40;
+    int idrCooldownMs = 500;
+    FrameDropPolicy frameDropPolicy = FrameDropPolicy::Auto;
 
     bool operator==(const StreamSettings&) const = default;
 };

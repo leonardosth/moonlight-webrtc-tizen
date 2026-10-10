@@ -107,6 +107,10 @@ int main()
         require(logContent.find("50000 kbps (50.0 Mbps)") != std::string::npos, "Log must contain bitrate");
         require(logContent.find("Frame Drop Policy:    Active (25ms deadline)") != std::string::npos,
                 "Log must contain Frame Drop Policy");
+        require(logContent.find("Sunshine Encryption:  Enabled (AES-128 GCM)") != std::string::npos,
+                "Log must contain Sunshine Encryption");
+        require(logContent.find("Target Jitter Buffer: 15ms (Video), 40ms (Audio)") != std::string::npos,
+                "Log must contain Target Jitter Buffer");
         require(logContent.find("Keyframe Rate Limiter: Active (350ms cooldown)") != std::string::npos,
                 "Log must contain Keyframe Rate Limiter");
         require(logContent.find("NACK History Buffer:  8192 packets") != std::string::npos,

@@ -50,8 +50,15 @@ assert.ok(html.includes("Moonlight WebRTC Client"), "the Client title is missing
 assert.ok(!html.includes("Moonlight WebRTC Tizen"), "the old visible Tizen title remains");
 assert.ok(config.includes("<name>Moonlight WebRTC Client</name>"),
   "the installed Tizen application title must identify the Client");
-assert.ok(html.includes('data-category="video"') && html.includes('data-category="about"'),
+assert.ok(html.includes('data-category="video"') && html.includes('data-category="advanced"') && html.includes('data-category="about"'),
   "all settings categories are required");
+assert.ok(html.includes('data-settings-panel="advanced"'), "Advanced settings panel is required");
+assert.ok(html.includes('id="encryption-select"') && html.includes('id="frame-drop-policy-select"'),
+  "advanced encryption and frame drop policy selects must be present");
+assert.ok(html.includes('id="video-jitter-buffer-select"') && html.includes('id="audio-jitter-buffer-select"'),
+  "advanced video and audio jitter buffer selects must be present");
+assert.ok(html.includes('id="rtp-fragment-size-select"') && html.includes('id="idr-cooldown-select"'),
+  "advanced RTP fragment size and IDR cooldown selects must be present");
 assert.ok(html.includes('id="fps-select"'),
   "FPS select setting is missing");
 assert.ok(!html.includes("Optimize game settings"),
@@ -200,7 +207,11 @@ function storage() {
 const persistentStorage = storage();
 const preferences = global.ClientPreferences.create(persistentStorage);
 assert.deepStrictEqual(preferences.load(), {
-  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
+  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null,
+  latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
+  streamingPreset: "balanced", sunshineEncryption: true, frameDropPolicy: "auto",
+  videoJitterBufferTargetMs: 15, audioJitterBufferTargetMs: 40,
+  rtpMaxFragmentSize: 1360, idrCooldownMs: 500,
 }, "empty storage must use the current defaults");
 preferences.update("resolution", "3840x2160");
 preferences.update("fps", 120);
@@ -210,17 +221,32 @@ preferences.update("bitrateKbps", 50000);
 preferences.update("latencyMode", "lowest_latency");
 preferences.update("packetPacing", "aggressive");
 preferences.update("frameInterpolation", true);
+preferences.update("streamingPreset", "ultra_low_latency");
+preferences.update("sunshineEncryption", false);
+preferences.update("frameDropPolicy", "disabled");
+preferences.update("videoJitterBufferTargetMs", 0);
+preferences.update("audioJitterBufferTargetMs", 15);
+preferences.update("rtpMaxFragmentSize", 1420);
+preferences.update("idrCooldownMs", 250);
 assert.deepStrictEqual(global.ClientPreferences.create(persistentStorage).load(), {
   resolution: "3840x2160", fps: 120, codec: "hevc", hdr: true, bitrateKbps: 50000,
   latencyMode: "lowest_latency", packetPacing: "aggressive", frameInterpolation: true,
+  streamingPreset: "ultra_low_latency", sunshineEncryption: false, frameDropPolicy: "disabled",
+  videoJitterBufferTargetMs: 0, audioJitterBufferTargetMs: 15,
+  rtpMaxFragmentSize: 1420, idrCooldownMs: 250,
 }, "saved preferences must survive a simulated application reload");
 assert.strictEqual(preferences.snapshot().fps, 120,
   "FPS must be a persisted selectable preference");
 persistentStorage.setItem(global.ClientPreferences.STORAGE_KEY, JSON.stringify({
   resolution: 4, fps: "sixty", codec: false, hdr: "true", bitrateKbps: -1, latencyMode: 123, packetPacing: 456, frameInterpolation: "yes",
+  streamingPreset: 999, sunshineEncryption: "nope", frameDropPolicy: 123, videoJitterBufferTargetMs: -5, audioJitterBufferTargetMs: "ten", rtpMaxFragmentSize: 9999, idrCooldownMs: 10,
 }));
 assert.deepStrictEqual(global.ClientPreferences.create(persistentStorage).load(), {
-  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null, latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
+  resolution: null, fps: null, codec: null, hdr: false, bitrateKbps: null,
+  latencyMode: "balanced", packetPacing: "balanced", frameInterpolation: false,
+  streamingPreset: "balanced", sunshineEncryption: true, frameDropPolicy: "auto",
+  videoJitterBufferTargetMs: 15, audioJitterBufferTargetMs: 40,
+  rtpMaxFragmentSize: 1360, idrCooldownMs: 500,
 }, "invalid persisted values must fall back safely");
 assert.strictEqual(global.ClientPreferences.resolveSupported("vp9", ["h264", "hevc", "av1"], "h264"), "h264",
   "unsupported persisted options must fall back to the current supported default");

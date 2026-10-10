@@ -180,6 +180,29 @@ int main()
             balancedPacer.stop();
         }
 
+        // Test PacingMediaHandler Fast mode: 8 immediate packets, 4.0x multiplier
+        {
+            gateway::PacingMediaHandler fastPacer(gateway::PacketPacing::Fast, 60, 50000);
+            rtc::message_vector msgs;
+            for (int i = 0; i < 12; ++i) {
+                msgs.push_back(rtc::make_message(200));
+            }
+            std::atomic<int> sentCount = 0;
+            fastPacer.outgoing(msgs, [&](rtc::message_ptr) { sentCount.fetch_add(1); });
+            require(msgs.empty(), "Fast pacer must consume outgoing messages vector");
+            require(sentCount.load() >= 8, "Fast pacer must dispatch initial burst of 8 packets immediately");
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            require(sentCount.load() == 12, "Fast pacer must dispatch all packets quickly");
+
+            const auto stats = fastPacer.stats();
+            require(stats.totalBursts == 1, "Fast PacingStats totalBursts incorrect");
+            require(stats.totalPacketsImmediate == 8, "Fast PacingStats totalPacketsImmediate incorrect");
+            require(stats.totalPacketsPaced == 4, "Fast PacingStats totalPacketsPaced incorrect");
+            require(stats.maxBurstPackets == 12, "Fast PacingStats maxBurstPackets incorrect");
+            fastPacer.stop();
+        }
+
         std::cout << "WebRTC media sender tests passed\n";
         return 0;
     } catch (const std::exception& error) {

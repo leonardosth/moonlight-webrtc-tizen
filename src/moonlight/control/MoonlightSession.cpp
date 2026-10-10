@@ -219,7 +219,7 @@ STREAM_CONFIGURATION MoonlightSession::createStreamConfiguration(
     configuration.clientRefreshRateX100 = settings.fps * 100;
     configuration.colorSpace = profile.colorSpace;
     configuration.colorRange = profile.colorRange;
-    configuration.encryptionFlags = ENCFLG_ALL;
+    configuration.encryptionFlags = settings.sunshineEncryption ? ENCFLG_ALL : ENCFLG_NONE;
 
     if (RAND_bytes(
             reinterpret_cast<unsigned char*>(configuration.remoteInputAesKey),

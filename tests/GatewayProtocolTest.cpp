@@ -374,6 +374,58 @@ int main()
         require(startPacingAggressive.settings.packetPacing == gateway::PacketPacing::Aggressive,
                 "aggressive packetPacing parsing failed");
 
+        const auto advancedSettingsMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1920},
+              {"height", 1080},
+              {"fps", 60},
+              {"codec", "hevc"},
+              {"bitrateKbps", 20000},
+              {"hdr", false},
+              {"packetPacing", "fast"},
+              {"sunshineEncryption", false},
+              {"rtpMaxFragmentSize", 1200},
+              {"videoJitterBufferTargetMs", 0},
+              {"idrCooldownMs", 250},
+              {"frameDropPolicy", "disabled"}}},
+            {"audio", {{"channels", 2}, {"jitterBufferTargetMs", 15}}},
+        }).dump();
+        const auto parsedAdvanced = gateway::protocol::parseClientMessage(advancedSettingsMsg);
+        const auto& startAdvanced = std::get<gateway::protocol::StartSessionRequest>(parsedAdvanced.payload);
+        require(startAdvanced.settings.packetPacing == gateway::PacketPacing::Fast,
+                "fast packetPacing parsing failed");
+        require(!startAdvanced.settings.sunshineEncryption,
+                "sunshineEncryption false parsing failed");
+        require(startAdvanced.settings.rtpMaxFragmentSize == 1200,
+                "rtpMaxFragmentSize parsing failed");
+        require(startAdvanced.settings.videoJitterBufferTargetMs == 0,
+                "videoJitterBufferTargetMs parsing failed");
+        require(startAdvanced.settings.audioJitterBufferTargetMs == 15,
+                "audioJitterBufferTargetMs parsing failed");
+        require(startAdvanced.settings.idrCooldownMs == 250,
+                "idrCooldownMs parsing failed");
+        require(startAdvanced.settings.frameDropPolicy == gateway::FrameDropPolicy::Disabled,
+                "disabled frameDropPolicy parsing failed");
+
+        const auto advancedStatus = gateway::protocol::makeSessionStatus("active", 2, startAdvanced.settings);
+        require(advancedStatus["video"]["packetPacing"] == "fast",
+                "advancedStatus packetPacing serialization failed");
+        require(advancedStatus["video"]["sunshineEncryption"] == false,
+                "advancedStatus sunshineEncryption serialization failed");
+        require(advancedStatus["video"]["rtpMaxFragmentSize"] == 1200,
+                "advancedStatus rtpMaxFragmentSize serialization failed");
+        require(advancedStatus["video"]["videoJitterBufferTargetMs"] == 0,
+                "advancedStatus videoJitterBufferTargetMs serialization failed");
+        require(advancedStatus["video"]["idrCooldownMs"] == 250,
+                "advancedStatus idrCooldownMs serialization failed");
+        require(advancedStatus["video"]["frameDropPolicy"] == "disabled",
+                "advancedStatus frameDropPolicy serialization failed");
+        require(advancedStatus["audio"]["jitterBufferTargetMs"] == 15,
+                "advancedStatus audio jitterBufferTargetMs serialization failed");
+
         requireProtocolError(
             [] {
                 gateway::protocol::parseClientMessage(

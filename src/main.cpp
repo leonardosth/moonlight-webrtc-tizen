@@ -775,7 +775,7 @@ private:
         session->videoRtpStartTimestamp = rtpConfiguration->startTimestamp;
         constexpr std::size_t VideoRtcpNackBufferSize = 8192;
         auto packetizer = gateway::makeVideoRtpPacketizer(
-            settings.codec, rtpConfiguration, gateway::DefaultVideoRtpMaxFragmentSize);
+            settings.codec, rtpConfiguration, static_cast<std::size_t>(settings.rtpMaxFragmentSize));
         packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtpConfiguration));
         packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(VideoRtcpNackBufferSize));
         packetizer->addToChain(std::make_shared<rtc::PliHandler>(
@@ -986,6 +986,9 @@ private:
             case gateway::PacketPacing::Disabled:
                 params.packetPacing = "Disabled (Immediate Burst)";
                 break;
+            case gateway::PacketPacing::Fast:
+                params.packetPacing = "Fast (4.00x delivery window / 25% budget)";
+                break;
             case gateway::PacketPacing::Balanced:
                 params.packetPacing = "Balanced (1.15x smooth Wi-Fi budget)";
                 break;
@@ -993,8 +996,28 @@ private:
                 params.packetPacing = "Aggressive (1.05x max stability)";
                 break;
             }
+            switch (session->settings.frameDropPolicy) {
+            case gateway::FrameDropPolicy::Disabled:
+                params.frameDropPolicyName = "Disabled";
+                params.frameDeadlineUs = 0;
+                break;
+            case gateway::FrameDropPolicy::Tolerant:
+                params.frameDropPolicyName = "Tolerant (~250ms deadline)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 15.0f);
+                break;
+            case gateway::FrameDropPolicy::Strict:
+                params.frameDropPolicyName = "Strict (1.5x frame interval)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 1.5f);
+                break;
+            case gateway::FrameDropPolicy::Auto:
+                params.frameDropPolicyName = "Auto";
+                break;
+            }
             params.frameDropPolicy = params.frameDeadlineUs > 0;
             params.idrCooldownMs = moonlightSession->idrCooldownMs();
+            params.sunshineEncryption = session->settings.sunshineEncryption;
+            params.videoJitterBufferTargetMs = session->settings.videoJitterBufferTargetMs;
+            params.audioJitterBufferTargetMs = session->settings.audioJitterBufferTargetMs;
             params.gameMode = true;
             params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             if (session->rtpPlayoutDelayNegotiated) {
@@ -1007,7 +1030,7 @@ private:
             params.bufferPool = true;
             params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
             params.nackBufferSize = 8192;
-            params.rtpFragmentSize = gateway::DefaultVideoRtpMaxFragmentSize;
+            params.rtpFragmentSize = static_cast<std::size_t>(session->settings.rtpMaxFragmentSize);
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 
