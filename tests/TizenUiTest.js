@@ -325,4 +325,11 @@ assert.ok(appSource.includes("function stopCurrentHostSession()")
 assert.ok(appSource.includes("isMenuKey") && appSource.includes("openFocusedApplicationMenu"),
   "TV remote MediaPlayPause and color keys must open the focused application/gateway context menu");
 
+assert.ok(appSource.includes('if (direction === "down") { changeGatewayOctet(-1); return true; }'),
+  "DOWN arrow on an IP octet must decrement the octet value");
+assert.ok(appSource.includes('if (direction === "up") { changeGatewayOctet(1); return true; }'),
+  "UP arrow on an IP octet must increment the octet value");
+assert.ok(appSource.includes("gatewayEditorCancelButton.focus();") && appSource.includes("gatewayEditorConnectButton.focus();"),
+  "lateral navigation at octet boundaries must move to Cancel/Connect buttons");
+
 console.log("Tizen UI tests passed");

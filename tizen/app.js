@@ -371,6 +371,19 @@ let autostartLaunched = false;
 let autostartEverStreamed = false;
 let autostartFailed = false;
 let autostartConnectTimer = null;
+let autostartSunshineRetryTimer = null;
+let autostartRetryDeadline = 0;
+
+function clearAutostartRetryTimers() {
+  if (autostartConnectTimer !== null) {
+    clearTimeout(autostartConnectTimer);
+    autostartConnectTimer = null;
+  }
+  if (autostartSunshineRetryTimer !== null) {
+    clearTimeout(autostartSunshineRetryTimer);
+    autostartSunshineRetryTimer = null;
+  }
+}
 let isSwitchingStreamSettings = false;
 let switchingSettingsTimer = null;
 
@@ -1206,6 +1219,22 @@ function applyApplications(nextApplications) {
     ui.showApplications();
   }
   if (autostartTargetApp && !autostartLaunched) {
+    if (applications.length > 0) {
+      sunshineReady = true;
+    } else if (Date.now() < autostartRetryDeadline) {
+      log("Autostart: Sunshine returned 0 applications, waiting for Sunshine to finish startup...");
+      launchingStatusElement.textContent = "Host is awake. Waiting for Sunshine applications…";
+      if (autostartSunshineRetryTimer !== null) {
+        clearTimeout(autostartSunshineRetryTimer);
+      }
+      autostartSunshineRetryTimer = setTimeout(function () {
+        autostartSunshineRetryTimer = null;
+        if (isAutostartSession && !autostartLaunched && gatewayConnected) {
+          requestApplications();
+        }
+      }, 2500);
+      return;
+    }
     attemptAutostartLaunch();
   }
 }
@@ -1228,6 +1257,20 @@ function handleGatewayError(message) {
     sessionState = "idle";
     sessionStateElement.textContent = "Idle";
     if (!launchingScreen.hidden) {
+      if (isAutostartSession && (message.requestType === "get-apps" || message.code === "sunshine-unavailable") && Date.now() < autostartRetryDeadline) {
+        log("Autostart: Sunshine not ready yet (" + detail + "), retrying in 2.5s...");
+        launchingStatusElement.textContent = "Host is awake. Waiting for Sunshine to initialize…";
+        if (autostartSunshineRetryTimer !== null) {
+          clearTimeout(autostartSunshineRetryTimer);
+        }
+        autostartSunshineRetryTimer = setTimeout(function () {
+          autostartSunshineRetryTimer = null;
+          if (isAutostartSession && !autostartLaunched && gatewayConnected) {
+            requestApplications();
+          }
+        }, 2500);
+        return;
+      }
       showHome("applications");
     }
     updatePlayAvailability();
@@ -1346,6 +1389,7 @@ function handleSessionStatus(message) {
   } else if (message.state === "idle") {
     launchCancellationRequested = false;
     launchCancellationSent = false;
+    sessionTeardownInProgress = false;
     closePeerConnection();
     currentSessionId = 0;
     if (isSwitchingStreamSettings) {
@@ -1353,6 +1397,12 @@ function handleSessionStatus(message) {
       return;
     }
     if (isAutostartSession && autostartEverStreamed) {
+      log("Autostart session ended, exiting application cleanly");
+      isAutostartSession = false;
+      autostartEverStreamed = false;
+      autostartLaunched = false;
+      autostartTargetApp = null;
+      clearAutostartRetryTimers();
       exitApplication();
       return;
     }
@@ -2689,14 +2739,16 @@ function navigateGatewayEditor(direction) {
     gatewayEditorState.selectedOctet = octetIndex;
     if (direction === "left") {
       if (octetIndex > 0) { focusGatewayOctet(octetIndex - 1); return true; }
-      return false;
+      gatewayEditorCancelButton.focus();
+      return true;
     }
     if (direction === "right") {
       if (octetIndex + 1 < gatewayOctetButtons.length) { focusGatewayOctet(octetIndex + 1); return true; }
-      return false;
+      gatewayEditorConnectButton.focus();
+      return true;
     }
     if (direction === "up") { changeGatewayOctet(1); return true; }
-    if (direction === "down") { gatewayEditorCancelButton.focus(); return true; }
+    if (direction === "down") { changeGatewayOctet(-1); return true; }
   }
   if (active === gatewayEditorCancelButton || active === gatewayEditorConnectButton) {
     if (direction === "left" || direction === "right") {
@@ -3020,6 +3072,15 @@ function changeSelect(select, direction) {
 }
 
 function exitApplication() {
+  isAutostartSession = false;
+  autostartEverStreamed = false;
+  autostartLaunched = false;
+  autostartTargetApp = null;
+  clearAutostartRetryTimers();
+  try {
+    closeActiveGatewayConnection();
+    closePeerConnection();
+  } catch (_e) {}
   try {
     if (window.tizen && tizen.application) {
       tizen.application.getCurrentApplication().exit();
@@ -3207,7 +3268,16 @@ function activateFocusedControl() {
       connectGatewayFromEditor();
       return true;
     }
-    return gatewayOctetButtons.indexOf(active) >= 0;
+    const octetIndex = gatewayOctetButtons.indexOf(active);
+    if (octetIndex >= 0) {
+      if (octetIndex + 1 < gatewayOctetButtons.length) {
+        focusGatewayOctet(octetIndex + 1);
+      } else {
+        gatewayEditorConnectButton.focus();
+      }
+      return true;
+    }
+    return false;
   }
   if (gatewayContextMenuIsOpen()) {
     if (active === gatewayWakeButton) {
@@ -4549,6 +4619,7 @@ function handleAutostartHostUnreachable(gateway) {
   if (gateway.macAddress && wakeOnLan.isSupported()) {
     launchingStatusElement.textContent = "Host offline. Sending Wake-on-LAN to " + gateway.name + "…";
     log("Autostart: triggering Wake-on-LAN for " + gateway.name);
+    autostartRetryDeadline = Date.now() + 90000;
     wakeGateway(gateway.id);
   } else {
     autostartFailed = true;
@@ -4563,6 +4634,15 @@ function attemptAutostartLaunch() {
   }
   if (!gatewayConnected || !sunshineReady || !appsLoaded || !applications || applications.length === 0) {
     log("Autostart: waiting for Sunshine readiness (connected=" + gatewayConnected + ", sunshine=" + sunshineReady + ", apps=" + appsLoaded + ")");
+    if (isAutostartSession && gatewayConnected && Date.now() < autostartRetryDeadline && autostartSunshineRetryTimer === null) {
+      launchingStatusElement.textContent = "Host is awake. Waiting for Sunshine readiness…";
+      autostartSunshineRetryTimer = setTimeout(function () {
+        autostartSunshineRetryTimer = null;
+        if (isAutostartSession && !autostartLaunched && gatewayConnected) {
+          requestApplications();
+        }
+      }, 2500);
+    }
     return false;
   }
 
@@ -4582,6 +4662,7 @@ function attemptAutostartLaunch() {
   }
 
   if (match) {
+    clearAutostartRetryTimers();
     autostartLaunched = true;
     log("Autostart: launching application '" + match.title + "' (ID " + match.id + ")");
     launchingAppElement.textContent = match.title;
@@ -4606,6 +4687,20 @@ function attemptAutostartLaunch() {
     startSelectedSession();
     return true;
   } else {
+    if (isAutostartSession && Date.now() < autostartRetryDeadline) {
+      log("Autostart: target app '" + autostartTargetApp + "' not found yet, retrying in 2.5s...");
+      launchingStatusElement.textContent = "Host is awake. Searching for " + autostartTargetApp + "…";
+      if (autostartSunshineRetryTimer !== null) {
+        clearTimeout(autostartSunshineRetryTimer);
+      }
+      autostartSunshineRetryTimer = setTimeout(function () {
+        autostartSunshineRetryTimer = null;
+        if (isAutostartSession && !autostartLaunched && gatewayConnected) {
+          requestApplications();
+        }
+      }, 2500);
+      return false;
+    }
     log("Autostart: application '" + autostartTargetApp + "' not found in Sunshine application list");
     autostartFailed = true;
     showNotification("Application not found", "Sunshine did not return '" + autostartTargetApp + "'.", true);
@@ -4623,6 +4718,8 @@ function triggerAutostart(targetAppName) {
   autostartLaunched = false;
   autostartEverStreamed = false;
   autostartFailed = false;
+  autostartRetryDeadline = Date.now() + 60000;
+  clearAutostartRetryTimers();
   log("Autostart triggered for target app: " + autostartTargetApp);
 
   if (!savedGateways || savedGateways.length === 0) {
@@ -4691,6 +4788,13 @@ function getRequestedAutostartTarget() {
 }
 
 function checkRequestedAppControl() {
+  try {
+    if (window.tizen && tizen.application) {
+      tizen.application.getCurrentApplication().show();
+    }
+  } catch (_e) {}
+  sessionTeardownInProgress = false;
+  sessionState = "idle";
   const target = getRequestedAutostartTarget();
   if (target) {
     triggerAutostart(target);

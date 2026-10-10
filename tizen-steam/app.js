@@ -29,6 +29,29 @@
 
     setStatus("Iniciando Moonlight WebRTC...");
 
+    function scheduleExit() {
+      let exited = false;
+      function doExit() {
+        if (exited) {
+          return;
+        }
+        exited = true;
+        try {
+          tizen.application.getCurrentApplication().exit();
+        } catch (_e) {}
+      }
+
+      // Exit only after Moonlight has taken over the screen and covered this window:
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          setTimeout(doExit, 300);
+        }
+      });
+
+      // Safe fallback timeout to prevent staying in background indefinitely
+      setTimeout(doExit, 3500);
+    }
+
     try {
       const appControlData = new tizen.ApplicationControlData("autostart", ["Steam"]);
       const appControl = new tizen.ApplicationControl(
@@ -44,11 +67,7 @@
         TARGET_APP_ID,
         function () {
           setStatus("Conectando ao Moonlight...");
-          setTimeout(function () {
-            try {
-              tizen.application.getCurrentApplication().exit();
-            } catch (_e) {}
-          }, 800);
+          scheduleExit();
         },
         function (error) {
           console.warn("launchAppControl falhou, tentando launch direto:", error);
@@ -57,11 +76,7 @@
               TARGET_APP_ID,
               function () {
                 setStatus("Conectando ao Moonlight...");
-                setTimeout(function () {
-                  try {
-                    tizen.application.getCurrentApplication().exit();
-                  } catch (_e) {}
-                }, 800);
+                scheduleExit();
               },
               function (launchErr) {
                 const errDetail = (launchErr && (launchErr.message || launchErr.name)) || (error && (error.message || error.name)) || "App não encontrado";
@@ -80,11 +95,7 @@
           TARGET_APP_ID,
           function () {
             setStatus("Conectando ao Moonlight...");
-            setTimeout(function () {
-              try {
-                tizen.application.getCurrentApplication().exit();
-              } catch (_e) {}
-            }, 800);
+            scheduleExit();
           },
           function (launchErr) {
             showError("Erro ao abrir Moonlight: " + (launchErr.message || err.message));
