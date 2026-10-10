@@ -270,6 +270,48 @@ int main()
                     == settingsHdrAv1_1080,
                 "AV1 HDR 1080p start-session parsing failed");
 
+        const auto lowestLatencyMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"latencyMode", "lowest_latency"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedLowestLatency = gateway::protocol::parseClientMessage(lowestLatencyMsg);
+        const auto& startLowest = std::get<gateway::protocol::StartSessionRequest>(parsedLowestLatency.payload);
+        require(startLowest.settings.latencyMode == gateway::LatencyMode::LowestLatency,
+                "lowest_latency latencyMode parsing failed");
+
+        const auto smoothestMsg = nlohmann::json({
+            {"version", 1},
+            {"type", "start-session"},
+            {"appId", "7"},
+            {"video",
+             {{"width", 1280},
+              {"height", 720},
+              {"fps", 60},
+              {"codec", "h264"},
+              {"bitrateKbps", 12000},
+              {"hdr", false},
+              {"latencyMode", "smoothest"}}},
+            {"audio", {{"channels", 2}}},
+        }).dump();
+        const auto parsedSmoothest = gateway::protocol::parseClientMessage(smoothestMsg);
+        const auto& startSmoothest = std::get<gateway::protocol::StartSessionRequest>(parsedSmoothest.payload);
+        require(startSmoothest.settings.latencyMode == gateway::LatencyMode::Smoothest,
+                "smoothest latencyMode parsing failed");
+
+        const auto sessionStatus = gateway::protocol::makeSessionStatus("active", 1, startLowest.settings);
+        require(sessionStatus["video"]["latencyMode"] == "lowest_latency",
+                "sessionStatus latencyMode serialization failed");
+
         requireProtocolError(
             [] {
                 gateway::protocol::parseClientMessage(
@@ -542,6 +584,32 @@ int main()
         require(!gateway::videoExtensionId(
                     colorSpaceSdp, "urn:example:not-negotiated"),
                 "Unrelated video extmap was accepted");
+
+        const std::string playoutDelaySdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "a=extmap:10 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+        require(gateway::videoExtensionId(
+                    playoutDelaySdp,
+                    "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")
+                    == 10,
+                "Video playout-delay extmap was not parsed");
+
+        const std::string bandwidthSdp =
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+            "c=IN IP4 0.0.0.0\r\n"
+            "b=AS:70000\r\n"
+            "a=rtpmap:96 AV1/90000\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+            "b=AS:128\r\n";
+        require(gateway::videoBandwidthKbps(bandwidthSdp) == 70000,
+                "videoBandwidthKbps failed to parse b=AS:70000");
+        require(gateway::hasExpectedVideoBandwidth(bandwidthSdp, 70000),
+                "hasExpectedVideoBandwidth failed for matching bitrate");
+        require(!gateway::hasExpectedVideoBandwidth(bandwidthSdp, 50000),
+                "hasExpectedVideoBandwidth accepted mismatching bitrate");
+        require(!gateway::hasExpectedVideoBandwidth(playoutDelaySdp, 70000),
+                "hasExpectedVideoBandwidth accepted SDP without b=AS");
 
         const auto capabilities = gateway::protocol::makeCapabilities();
         require(capabilities.at("resolutions").size() == 4

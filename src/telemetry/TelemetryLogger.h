@@ -26,10 +26,14 @@ struct SessionParameters {
     int bitrateKbps = 0;
     bool hdr = false;
     int audioChannels = 2;
-    std::string latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
+    std::string latencyMode = "Balanced";
     bool gameMode = true;
     bool rtpPlayoutDelay = false;
     bool rvfc = true;
+    bool bufferPool = true;
+    bool frameDropPolicy = true;
+    std::uint64_t frameDeadlineUs = 0;
+    int sdpBandwidthCapKbps = 0;
     std::string clientIp;
 };
 
@@ -51,6 +55,9 @@ struct ClientTelemetrySample {
     double audioJitterMs = 0.0;
     double clientFrameIntervalMs = 0.0;
     double clientFrameJitterMs = 0.0;
+    double rvfcProcessingMs = 0.0;
+    double rvfcExpectedDelayMs = 0.0;
+    std::uint64_t rvfcPresentedFrames = 0;
 };
 
 struct HostTelemetrySample {
@@ -61,7 +68,9 @@ struct HostTelemetrySample {
     float hostProcessingLatencyMs = 0.0f;
     float gatewayLatencyMs = 0.0f;
     float totalHostLatencyMs = 0.0f;
+    float flattenTimeMs = 0.0f;
     std::uint64_t totalFrames = 0;
+    std::uint64_t gatewayLateFrameDrops = 0;
 };
 
 struct MetricDistribution {
@@ -107,11 +116,14 @@ private:
         std::vector<double> decodeTimeSamples;
         std::vector<double> hostLatencySamples;
         std::vector<double> gatewayLatencySamples;
+        std::vector<double> flattenTimeSamples;
         std::vector<double> hostProcessingSamples;
         std::vector<double> rttSamples;
         std::vector<double> clientFpsSamples;
         std::vector<double> hostFpsSamples;
         std::vector<double> videoJitterSamples;
+        std::vector<double> rvfcProcessingSamples;
+        std::vector<double> rvfcDelaySamples;
         ClientTelemetrySample lastClientSample;
         std::optional<HostTelemetrySample> lastHostSample;
     };

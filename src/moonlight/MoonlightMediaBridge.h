@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/MediaSender.h"
+#include "moonlight/FlatBufferPool.h"
 #include "session/StreamSettings.h"
 
 #include <Limelight.h>
@@ -32,6 +33,7 @@ struct MoonlightVideoDiagnostics {
     std::optional<int> bitDepthChroma;
     std::optional<int> chromaFormatIdc;
     std::uint16_t frameHostProcessingLatency = 0;
+    float flattenTimeMs = 0.0f;
 };
 
 struct MoonlightStreamDiagnostics {
@@ -50,9 +52,11 @@ struct MoonlightStreamDiagnostics {
     float hostFrameJitterMs = 0.0f;
     float hostProcessingLatencyMs = 0.0f;
     float gatewayLatencyMs = 0.0f;
+    float flattenTimeMs = 0.0f;
     float totalHostLatencyMs = 0.0f;
     std::uint64_t totalFrames = 0;
     std::uint64_t totalBytes = 0;
+    std::uint64_t lateFrameDrops = 0;
 };
 
 class MoonlightMediaBridge {
@@ -76,6 +80,8 @@ public:
     [[nodiscard]] bool hasPendingIdrRequest() const;
     [[nodiscard]] std::optional<MoonlightVideoDiagnostics> lastVideoFrame() const;
     [[nodiscard]] MoonlightStreamDiagnostics currentStreamDiagnostics() const;
+    [[nodiscard]] std::uint64_t lateFrameDrops() const noexcept;
+    [[nodiscard]] std::uint64_t frameDeadlineUs() const noexcept;
 
 private:
     static int videoSetupCallback(int videoFormat,
@@ -122,6 +128,8 @@ private:
     std::atomic<bool> audioStarted_ = false;
     std::atomic<bool> moonlightIdrRequested_ = false;
     std::atomic<bool> waitingForMoonlightIdr_ = false;
+    std::atomic<std::uint64_t> lateFrameDrops_ = 0;
+    std::atomic<std::uint64_t> frameDeadlineUs_ = 0;
     std::atomic<int> audioSamplesPerFrame_ = 0;
     std::atomic<std::uint32_t> audioRtpTimestamp_ = 0;
     std::atomic<std::uint64_t> videoFrames_ = 0;
@@ -148,9 +156,11 @@ private:
     double windowIntervalSqSumMs_ = 0.0;
     double windowHostLatencySumMs_ = 0.0;
     double windowGatewayLatencySumMs_ = 0.0;
+    double windowFlattenTimeSumMs_ = 0.0;
     std::chrono::steady_clock::time_point nextVideoLog_{};
     std::chrono::steady_clock::time_point nextAudioLog_{};
     std::chrono::steady_clock::time_point hdrValidationDeadline_{};
+    FlatBufferPool bufferPool_{4, 2 * 1024 * 1024};
     std::mutex logMutex_;
 };
 

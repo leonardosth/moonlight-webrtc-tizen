@@ -110,6 +110,7 @@ target_link_libraries(moonlight_video_profile PUBLIC
 
 add_library(moonlight_media_bridge
     src/media/HevcSpsParser.cpp
+    src/moonlight/FlatBufferPool.cpp
     src/moonlight/MoonlightMediaBridge.cpp
 )
 
@@ -354,4 +355,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(telemetry_logger_test PRIVATE telemetry_logger)
     add_test(NAME telemetry_logger_test COMMAND telemetry_logger_test)
+
+    add_executable(flat_buffer_pool_test
+        tests/FlatBufferPoolTest.cpp
+    )
+    target_link_libraries(flat_buffer_pool_test PRIVATE moonlight_media_bridge)
+    add_test(NAME flat_buffer_pool_test COMMAND flat_buffer_pool_test)
 endif()

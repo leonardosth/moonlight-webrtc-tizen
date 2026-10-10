@@ -46,6 +46,8 @@ const bitrateSelect = document.getElementById("bitrate-select");
 const interpolationSelect = document.getElementById("interpolation-select");
 const interpolationStatusElement = document.getElementById("interpolation-status");
 const interpolationCanvas = document.getElementById("interpolation-canvas");
+const latencyModeSelect = document.getElementById("latency-mode-select");
+const latencyModeStatusElement = document.getElementById("latency-mode-status");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -225,6 +227,9 @@ let rvfcHandle = null;
 let rvfcRenderedFrames = 0;
 let rvfcLastTime = 0;
 let rvfcIntervals = [];
+let rvfcLastMetadata = null;
+let rvfcProcessingDurations = [];
+let rvfcPresentationDelays = [];
 
 function startVideoFrameCallback() {
   if (!videoElement || typeof videoElement.requestVideoFrameCallback !== "function") {
@@ -233,8 +238,30 @@ function startVideoFrameCallback() {
   if (rvfcHandle !== null) {
     return;
   }
-  function onFrame(now) {
+  function onFrame(now, metadata) {
     rvfcRenderedFrames++;
+    if (metadata && typeof metadata === "object") {
+      rvfcLastMetadata = metadata;
+      if (typeof metadata.processingDuration === "number" && metadata.processingDuration > 0) {
+        // processingDuration is in seconds; convert to milliseconds
+        const procMs = metadata.processingDuration * 1000;
+        if (procMs > 0 && procMs < 500) {
+          rvfcProcessingDurations.push(procMs);
+          if (rvfcProcessingDurations.length > 30) {
+            rvfcProcessingDurations.shift();
+          }
+        }
+      }
+      if (typeof metadata.expectedDisplayTime === "number" && metadata.expectedDisplayTime >= now) {
+        const delayMs = metadata.expectedDisplayTime - now;
+        if (delayMs >= 0 && delayMs < 500) {
+          rvfcPresentationDelays.push(delayMs);
+          if (rvfcPresentationDelays.length > 30) {
+            rvfcPresentationDelays.shift();
+          }
+        }
+      }
+    }
     if (rvfcLastTime > 0) {
       const delta = now - rvfcLastTime;
       if (delta > 0 && delta < 500) {
@@ -261,6 +288,9 @@ function stopVideoFrameCallback() {
   rvfcHandle = null;
   rvfcLastTime = 0;
   rvfcIntervals = [];
+  rvfcLastMetadata = null;
+  rvfcProcessingDurations = [];
+  rvfcPresentationDelays = [];
 }
 
 let hostDiagnosticsFirstReceived = false;
@@ -862,6 +892,7 @@ function currentPreferenceValues() {
     bitrateKbps: Number.isInteger(Number(bitrateSelect.value))
       ? Number(bitrateSelect.value) : null,
     frameInterpolation: interpolationSelect.value === "true",
+    latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
   };
 }
 
@@ -1336,6 +1367,7 @@ function handleSessionStatus(message) {
             codec: fallbackCodec,
             bitrateKbps: selectedSession.bitrateKbps,
             hdr: selectedSession.hdr,
+            latencyMode: selectedSession.latencyMode,
           },
           audio: { channels: 2 },
         });
@@ -1417,6 +1449,7 @@ function selectedSettings() {
     codec: codecSelect.value,
     bitrateKbps: Number(bitrateSelect.value),
     hdr: hdrSelect.value === "true",
+    latencyMode: latencyModeSelect ? latencyModeSelect.value : "balanced",
   };
 }
 
@@ -1443,6 +1476,7 @@ function startSelectedSession() {
         codec: selectedSession.codec,
         bitrateKbps: selectedSession.bitrateKbps,
         hdr: selectedSession.hdr,
+        latencyMode: selectedSession.latencyMode,
       },
       audio: { channels: 2 },
     });
@@ -1640,6 +1674,32 @@ async function handleRemoteCandidate(message) {
   await applyRemoteCandidate(candidate);
 }
 
+function injectVideoBandwidthSdp(sdp, bitrateKbps) {
+  if (!sdp || typeof sdp !== "string" || !bitrateKbps || bitrateKbps <= 0) {
+    return sdp;
+  }
+  if (sdp.indexOf("b=AS:") !== -1) {
+    return sdp.replace(/b=AS:\d+/g, "b=AS:" + String(bitrateKbps));
+  }
+  const videoIndex = sdp.indexOf("m=video");
+  if (videoIndex === -1) {
+    return sdp;
+  }
+  const nextLineEnd = sdp.indexOf("\r\n", videoIndex);
+  if (nextLineEnd === -1) {
+    return sdp;
+  }
+  const afterVideo = sdp.substring(nextLineEnd + 2);
+  let insertIndex = nextLineEnd + 2;
+  if (afterVideo.indexOf("c=") === 0) {
+    const cLineEnd = afterVideo.indexOf("\r\n");
+    if (cLineEnd !== -1) {
+      insertIndex = nextLineEnd + 2 + cLineEnd + 2;
+    }
+  }
+  return sdp.slice(0, insertIndex) + "b=AS:" + String(bitrateKbps) + "\r\n" + sdp.slice(insertIndex);
+}
+
 async function handleOffer(message) {
   if (typeof message.sessionId !== "number" || typeof message.sdp !== "string") {
     reportError("Invalid SDP offer", new Error("Missing sessionId or SDP"));
@@ -1656,7 +1716,24 @@ async function handleOffer(message) {
       await applyRemoteCandidate(pendingRemoteCandidates.shift());
     }
     const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
+    let localAnswer = answer;
+    if (selectedSession && selectedSession.bitrateKbps > 0) {
+      const modifiedSdp = injectVideoBandwidthSdp(answer.sdp, selectedSession.bitrateKbps);
+      try {
+        localAnswer = (typeof RTCSessionDescription !== "undefined")
+          ? new RTCSessionDescription({ type: "answer", sdp: modifiedSdp })
+          : { type: "answer", sdp: modifiedSdp };
+      } catch (_e) {
+        localAnswer = { type: "answer", sdp: modifiedSdp };
+      }
+    }
+    await peerConnection.setLocalDescription(localAnswer);
+    if (peerConnection.localDescription && peerConnection.localDescription.sdp.includes("http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")) {
+      log("WebRTC RTP playout-delay extension negotiated in answer");
+    }
+    if (peerConnection.localDescription && peerConnection.localDescription.sdp.includes("b=AS:")) {
+      log("WebRTC video bandwidth cap (b=AS) negotiated in answer");
+    }
     sendGatewayMessage({
       type: "answer",
       sessionId: message.sessionId,
@@ -1778,6 +1855,20 @@ function updateInterpolationStatus() {
   overlay.interpolation.textContent = measured
     ? String(status.sourceFps) + " → " + String(status.outputFps)
     : label;
+}
+
+const LATENCY_MODE_DESCRIPTIONS = {
+  lowest_latency: "Aggressive drop of late frames (>1.5× interval). Minimizes latency, but may drop frames on jittery networks.",
+  balanced: "Standard balance (up to 3× interval). Absorbs minor network jitter while keeping latency low and video smooth.",
+  smoothest: "No frame drops at gateway. Maximizes video smoothness and zero micro-stutter at the expense of temporary latency buildup.",
+};
+
+function updateLatencyModeStatus() {
+  if (!latencyModeSelect || !latencyModeStatusElement) {
+    return;
+  }
+  const mode = latencyModeSelect.value;
+  latencyModeStatusElement.textContent = LATENCY_MODE_DESCRIPTIONS[mode] || LATENCY_MODE_DESCRIPTIONS.balanced;
 }
 
 function updateTrackCounts() {
@@ -2492,6 +2583,7 @@ function applicationSessionRequest(type, applicationId) {
       codec: settings.codec,
       bitrateKbps: settings.bitrateKbps,
       hdr: settings.hdr,
+      latencyMode: settings.latencyMode,
     },
     audio: { channels: 2 },
   };
@@ -3119,6 +3211,12 @@ interpolationSelect.addEventListener("change", function () {
   persistCurrentPreferences();
   applyFrameInterpolation();
 });
+if (latencyModeSelect) {
+  latencyModeSelect.addEventListener("change", function () {
+    updateLatencyModeStatus();
+    persistCurrentPreferences();
+  });
+}
 
 function updateRemoteTracksForVisibility() {
   const enabled = !document.hidden;
@@ -3881,6 +3979,20 @@ async function updateStatistics() {
         }
       }
 
+      let rvfcProcessingMs = 0;
+      if (rvfcProcessingDurations.length > 0) {
+        const sum = rvfcProcessingDurations.reduce(function (a, b) { return a + b; }, 0);
+        rvfcProcessingMs = sum / rvfcProcessingDurations.length;
+      }
+      let rvfcExpectedDelayMs = 0;
+      if (rvfcPresentationDelays.length > 0) {
+        const sum = rvfcPresentationDelays.reduce(function (a, b) { return a + b; }, 0);
+        rvfcExpectedDelayMs = sum / rvfcPresentationDelays.length;
+      }
+      const rvfcPresented = (rvfcLastMetadata && typeof rvfcLastMetadata.presentedFrames === "number")
+        ? rvfcLastMetadata.presentedFrames
+        : rvfcRenderedFrames;
+
       if (sampleTime - lastStatisticsConsoleTime >= 5000) {
         lastStatisticsConsoleTime = sampleTime;
         console.log("Stream diagnostics: " + JSON.stringify({
@@ -3904,6 +4016,9 @@ async function updateStatistics() {
           packetsReceived: statisticValue(inboundVideo, "packetsReceived"),
           packetsLost: statisticValue(inboundVideo, "packetsLost"),
           bytesReceived: bytesReceived,
+          rvfcProcessingMs: rvfcProcessingMs > 0 ? Number(rvfcProcessingMs.toFixed(2)) : null,
+          rvfcExpectedDelayMs: rvfcExpectedDelayMs > 0 ? Number(rvfcExpectedDelayMs.toFixed(2)) : null,
+          rvfcPresentedFrames: rvfcPresented,
           audioPacketsReceived: inboundAudio
             ? statisticValue(inboundAudio, "packetsReceived") : 0,
           audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
@@ -3931,7 +4046,10 @@ async function updateStatistics() {
           audioPacketsLost: inboundAudio ? statisticValue(inboundAudio, "packetsLost") : 0,
           audioJitterMs: (inboundAudio && typeof inboundAudio.jitter === "number") ? Number((inboundAudio.jitter * 1000).toFixed(2)) : 0,
           clientFrameIntervalMs: clientAvgIntervalMs > 0 ? Number(clientAvgIntervalMs.toFixed(2)) : 0,
-          clientFrameJitterMs: clientJitterMs > 0 ? Number(clientJitterMs.toFixed(2)) : 0
+          clientFrameJitterMs: clientJitterMs > 0 ? Number(clientJitterMs.toFixed(2)) : 0,
+          rvfcProcessingMs: rvfcProcessingMs > 0 ? Number(rvfcProcessingMs.toFixed(2)) : 0,
+          rvfcExpectedDelayMs: rvfcExpectedDelayMs > 0 ? Number(rvfcExpectedDelayMs.toFixed(2)) : 0,
+          rvfcPresentedFrames: rvfcPresented
         });
       }
     }
@@ -4025,8 +4143,12 @@ detectWebRtcAv1Support();
 // preference set, and a select still holding its markup default would write that default
 // back over the saved value.
 interpolationSelect.value = savedPreferences.frameInterpolation ? "true" : "false";
+if (latencyModeSelect && savedPreferences && savedPreferences.latencyMode) {
+  latencyModeSelect.value = savedPreferences.latencyMode;
+}
 restoreCachedCapabilities();
 updateInterpolationStatus();
+updateLatencyModeStatus();
 renderGateways();
 probeSavedGateways();
 
@@ -4206,3 +4328,9 @@ if (requestedAutostart) {
 }
 
 window.addEventListener("appcontrol", checkRequestedAppControl);
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    injectVideoBandwidthSdp: injectVideoBandwidthSdp,
+  };
+}

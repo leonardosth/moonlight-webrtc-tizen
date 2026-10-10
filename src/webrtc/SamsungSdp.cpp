@@ -271,4 +271,37 @@ std::optional<int> videoExtensionId(std::string_view sdp, std::string_view uri)
     return std::nullopt;
 }
 
+std::optional<int> videoBandwidthKbps(std::string_view sdp)
+{
+    auto section = videoSection(sdp);
+    while (!section.empty()) {
+        const auto lineEnd = section.find("\r\n");
+        auto line = section.substr(0, lineEnd);
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        constexpr std::string_view prefix = "b=AS:";
+        if (line.starts_with(prefix)) {
+            const auto value = line.substr(prefix.size());
+            int kbps = 0;
+            const auto parsed = std::from_chars(
+                value.data(), value.data() + value.size(), kbps);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) {
+                return kbps;
+            }
+        }
+        if (lineEnd == std::string_view::npos) {
+            break;
+        }
+        section.remove_prefix(lineEnd + 2);
+    }
+    return std::nullopt;
+}
+
+bool hasExpectedVideoBandwidth(std::string_view sdp, int expectedBitrateKbps)
+{
+    const auto actual = videoBandwidthKbps(sdp);
+    return actual.has_value() && *actual == expectedBitrateKbps;
+}
+
 } // namespace gateway

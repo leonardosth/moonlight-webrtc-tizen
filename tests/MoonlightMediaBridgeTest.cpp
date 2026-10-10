@@ -1,13 +1,17 @@
 #include "media/HevcSpsParser.h"
 #include "moonlight/MoonlightMediaBridge.h"
 
+extern "C" std::uint64_t PltGetMicroseconds(void);
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -197,6 +201,85 @@ int main()
                 "P-frame diagnostics were not preserved");
         require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
                 "Moonlight IDR after keyframe request was not accepted");
+
+        // Test frame deadline drop policy in LowestLatency mode
+        {
+            RecordingMediaSender dropSender;
+            auto dropSettings = gateway::defaultStreamSettings();
+            dropSettings.latencyMode = gateway::LatencyMode::LowestLatency;
+            dropSettings.fps = 60;
+            gateway::MoonlightMediaBridge dropBridge(
+                dropSender,
+                dropSettings,
+                [](const std::string&) {});
+            auto* dropCallbacks = dropBridge.videoCallbacks();
+            require(dropCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &dropBridge, 0) == 0,
+                    "H.264 setup on dropBridge failed");
+            dropCallbacks->start();
+            require(dropBridge.frameDeadlineUs() > 0,
+                    "frameDeadlineUs must be configured in LowestLatency mode");
+
+            // IDR must not be dropped even if late
+            DECODE_UNIT lateIdr = idrUnit;
+            lateIdr.receiveTimeUs = 1;
+            require(dropCallbacks->submitDecodeUnit(&lateIdr) == DR_OK,
+                    "IDR frame must never be dropped by deadline");
+            require(dropBridge.lateFrameDrops() == 0, "IDR frame must not increment lateFrameDrops");
+
+            // Fresh P-frame (receiveTimeUs == now): must be accepted
+            const auto nowUs = PltGetMicroseconds();
+            DECODE_UNIT freshPframe = pframeUnit;
+            freshPframe.receiveTimeUs = nowUs;
+            require(dropCallbacks->submitDecodeUnit(&freshPframe) == DR_OK,
+                    "Fresh P-frame within deadline must return DR_OK");
+            require(dropBridge.lateFrameDrops() == 0,
+                    "Fresh P-frame must not increment lateFrameDrops");
+
+            // Late P-frame (age > deadline: e.g. age = 30ms > 25ms): must drop and return DR_NEED_IDR
+            std::this_thread::sleep_for(std::chrono::milliseconds(35));
+            const auto currentPlt = PltGetMicroseconds();
+            DECODE_UNIT latePframe = pframeUnit;
+            latePframe.receiveTimeUs = currentPlt > 30000 ? (currentPlt - 30000) : 1;
+            require(dropCallbacks->submitDecodeUnit(&latePframe) == DR_NEED_IDR,
+                    "Late P-frame exceeding deadline must return DR_NEED_IDR");
+            require(dropBridge.lateFrameDrops() == 1,
+                    "Late frame drop must increment lateFrameDrops counter");
+
+            // Subsequent late P-frame while waiting for IDR: returns DR_OK
+            require(dropCallbacks->submitDecodeUnit(&latePframe) == DR_OK,
+                    "Subsequent late P-frame while waiting for IDR must return DR_OK");
+            require(dropBridge.lateFrameDrops() == 2,
+                    "Second late frame drop must increment lateFrameDrops to 2");
+
+            // Stream recovers upon fresh IDR
+            lateIdr.receiveTimeUs = PltGetMicroseconds();
+            require(dropCallbacks->submitDecodeUnit(&lateIdr) == DR_OK,
+                    "IDR frame must be accepted and reset waitingForMoonlightIdr");
+        }
+
+        // Test Smoothest mode: frameDeadlineUs == 0 (no drops)
+        {
+            RecordingMediaSender smoothSender;
+            auto smoothSettings = gateway::defaultStreamSettings();
+            smoothSettings.latencyMode = gateway::LatencyMode::Smoothest;
+            gateway::MoonlightMediaBridge smoothBridge(
+                smoothSender,
+                smoothSettings,
+                [](const std::string&) {});
+            auto* smoothCallbacks = smoothBridge.videoCallbacks();
+            require(smoothCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &smoothBridge, 0) == 0,
+                    "H.264 setup on smoothBridge failed");
+            smoothCallbacks->start();
+            require(smoothBridge.frameDeadlineUs() == 0,
+                    "frameDeadlineUs must be 0 in Smoothest mode");
+
+            DECODE_UNIT latePframe = pframeUnit;
+            latePframe.receiveTimeUs = 1;
+            require(smoothCallbacks->submitDecodeUnit(&latePframe) == DR_OK,
+                    "Smoothest mode must never drop late frames");
+            require(smoothBridge.lateFrameDrops() == 0,
+                    "Smoothest mode must have 0 late frame drops");
+        }
 
         auto* audioCallbacks = bridge.audioCallbacks();
         OPUS_MULTISTREAM_CONFIGURATION unsupportedAudio{};

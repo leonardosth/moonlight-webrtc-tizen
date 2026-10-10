@@ -53,6 +53,8 @@ int main()
             params.hdr = true;
             params.audioChannels = 2;
             params.latencyMode = "Lowest Latency";
+            params.frameDeadlineUs = 25000;
+            params.sdpBandwidthCapKbps = 50000;
             params.clientIp = "192.168.1.100:50000";
 
             logger.logSessionStart(params);
@@ -71,6 +73,9 @@ int main()
                 client.packetsReceived = 1000 * (i + 1);
                 client.packetsLost = 0;
                 client.currentMbps = 49.5;
+                client.rvfcProcessingMs = 1.0 + i * 0.1;
+                client.rvfcExpectedDelayMs = 5.0 + i * 0.2;
+                client.rvfcPresentedFrames = 100 * (i + 1);
 
                 gateway::telemetry::HostTelemetrySample host;
                 host.hostFps = 60.0f;
@@ -80,6 +85,7 @@ int main()
                 host.gatewayLatencyMs = 0.3f;
                 host.totalHostLatencyMs = 2.3f;
                 host.totalFrames = 100 * (i + 1);
+                host.gatewayLateFrameDrops = 2;
 
                 logger.recordTelemetry(42, client, host);
             }
@@ -95,8 +101,16 @@ int main()
         require(logContent.find("3840x2160 @ 60 FPS") != std::string::npos, "Log must contain resolution and FPS");
         require(logContent.find("HEVC (HDR: Enabled)") != std::string::npos, "Log must contain HEVC with HDR");
         require(logContent.find("50000 kbps (50.0 Mbps)") != std::string::npos, "Log must contain bitrate");
+        require(logContent.find("Frame Drop Policy:    Active (25ms deadline)") != std::string::npos,
+                "Log must contain Frame Drop Policy");
+        require(logContent.find("SDP Bandwidth Cap:    Enabled (b=AS:50000)") != std::string::npos,
+                "Log must contain SDP Bandwidth Cap");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");
         require(logContent.find("TV Decode Time") != std::string::npos, "Log must contain TV Decode Time distribution");
+        require(logContent.find("TV RVFC Processing") != std::string::npos, "Log must contain TV RVFC Processing distribution");
+        require(logContent.find("TV RVFC Present Delay") != std::string::npos, "Log must contain TV RVFC Present Delay distribution");
+        require(logContent.find("Gateway Late Drops:     2") != std::string::npos, "Log must contain Gateway Late Drops");
+        require(logContent.find("dropGw: 2") != std::string::npos, "Log must contain dropGw in periodic line");
         require(logContent.find("p50:") != std::string::npos, "Log must contain p50 metric");
         require(logContent.find("p95:") != std::string::npos, "Log must contain p95 metric");
         require(logContent.find("p99:") != std::string::npos, "Log must contain p99 metric");

@@ -8,6 +8,7 @@
     codec: null,
     hdr: false,
     bitrateKbps: null,
+    latencyMode: "balanced",
     frameInterpolation: false,
   });
 
@@ -18,6 +19,7 @@
       codec: DEFAULTS.codec,
       hdr: DEFAULTS.hdr,
       bitrateKbps: DEFAULTS.bitrateKbps,
+      latencyMode: DEFAULTS.latencyMode,
       frameInterpolation: DEFAULTS.frameInterpolation,
     };
   }
@@ -41,6 +43,9 @@
     }
     if (Number.isInteger(candidate.bitrateKbps) && candidate.bitrateKbps > 0) {
       values.bitrateKbps = candidate.bitrateKbps;
+    }
+    if (typeof candidate.latencyMode === "string" && (candidate.latencyMode === "lowest_latency" || candidate.latencyMode === "balanced" || candidate.latencyMode === "smoothest")) {
+      values.latencyMode = candidate.latencyMode;
     }
     if (typeof candidate.frameInterpolation === "boolean") {
       values.frameInterpolation = candidate.frameInterpolation;

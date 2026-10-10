@@ -213,6 +213,9 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - Samsung Game Mode:    " << (params.gameMode ? "Enabled" : "Disabled") << "\n"
        << "  - RTP Playout Delay:    " << (params.rtpPlayoutDelay ? "Negotiated & Active" : "Disabled") << "\n"
        << "  - RVFC Frame Pacing:    " << (params.rvfc ? "Active" : "Disabled") << "\n"
+       << "  - Flat Buffer Pool:     " << (params.bufferPool ? "Enabled (4 slots x 2MB)" : "Disabled") << "\n"
+       << "  - Frame Drop Policy:    " << (params.frameDeadlineUs > 0 ? ("Active (" + std::to_string(params.frameDeadlineUs / 1000) + "ms deadline)") : "Disabled (Smoothest)") << "\n"
+       << "  - SDP Bandwidth Cap:    " << (params.sdpBandwidthCapKbps > 0 ? ("Enabled (b=AS:" + std::to_string(params.sdpBandwidthCapKbps) + ")") : "Disabled") << "\n"
        << "================================================================================\n";
 
     writeLocked(ss.str());
@@ -238,6 +241,12 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         if (clientSample.videoJitterMs > 0.0) {
             activeSession_->videoJitterSamples.push_back(clientSample.videoJitterMs);
         }
+        if (clientSample.rvfcProcessingMs > 0.0) {
+            activeSession_->rvfcProcessingSamples.push_back(clientSample.rvfcProcessingMs);
+        }
+        if (clientSample.rvfcExpectedDelayMs > 0.0) {
+            activeSession_->rvfcDelaySamples.push_back(clientSample.rvfcExpectedDelayMs);
+        }
 
         if (hostSample) {
             if (hostSample->hostFps > 0.0f) {
@@ -248,6 +257,9 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
             }
             if (hostSample->gatewayLatencyMs >= 0.0f && hostSample->gatewayLatencyMs < 500.0f) {
                 activeSession_->gatewayLatencySamples.push_back(hostSample->gatewayLatencyMs);
+            }
+            if (hostSample->flattenTimeMs > 0.0f) {
+                activeSession_->flattenTimeSamples.push_back(hostSample->flattenTimeMs);
             }
             if (hostSample->totalHostLatencyMs > 0.0f) {
                 activeSession_->hostLatencySamples.push_back(hostSample->totalHostLatencyMs);
@@ -264,12 +276,20 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
     if (hostSample) {
         ss << "Host: " << std::fixed << std::setprecision(1) << hostSample->hostFps << " FPS "
            << "(enc: " << hostSample->hostProcessingLatencyMs << "ms, gw: "
-           << hostSample->gatewayLatencyMs << "ms) | ";
+           << hostSample->gatewayLatencyMs << "ms, flat: "
+           << hostSample->flattenTimeMs << "ms";
+        if (hostSample->gatewayLateFrameDrops > 0) {
+            ss << ", dropGw: " << hostSample->gatewayLateFrameDrops;
+        }
+        ss << ") | ";
     }
 
     ss << "TV: " << std::fixed << std::setprecision(1) << clientSample.decodedFps << " FPS "
-       << "(decode: " << clientSample.decodeTimeMs << "ms, "
-       << "jit: " << clientSample.videoJitterMs << "ms, "
+       << "(decode: " << clientSample.decodeTimeMs << "ms, ";
+    if (clientSample.rvfcProcessingMs > 0.0) {
+        ss << "rvfc: " << clientSample.rvfcProcessingMs << "ms, ";
+    }
+    ss << "jit: " << clientSample.videoJitterMs << "ms, "
        << "rtt: " << clientSample.networkRttMs << "ms, "
        << "drop: " << clientSample.framesDropped
        << (clientSample.droppedPerSec > 0 ? " [+" + std::to_string(clientSample.droppedPerSec) + "/s]" : "")
@@ -298,14 +318,18 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     auto decodeDist = computeDistribution(activeSession_->decodeTimeSamples);
     auto hostLatencyDist = computeDistribution(activeSession_->hostLatencySamples);
     auto gwLatencyDist = computeDistribution(activeSession_->gatewayLatencySamples);
+    auto flattenDist = computeDistribution(activeSession_->flattenTimeSamples);
     auto hostProcDist = computeDistribution(activeSession_->hostProcessingSamples);
     auto rttDist = computeDistribution(activeSession_->rttSamples);
     auto clientFpsDist = computeDistribution(activeSession_->clientFpsSamples);
     auto hostFpsDist = computeDistribution(activeSession_->hostFpsSamples);
     auto videoJitterDist = computeDistribution(activeSession_->videoJitterSamples);
+    auto rvfcProcDist = computeDistribution(activeSession_->rvfcProcessingSamples);
+    auto rvfcDelayDist = computeDistribution(activeSession_->rvfcDelaySamples);
 
     const auto& lastClient = activeSession_->lastClientSample;
     const auto totalFramesSent = activeSession_->lastHostSample ? activeSession_->lastHostSample->totalFrames : 0;
+    const auto totalLateDrops = activeSession_->lastHostSample ? activeSession_->lastHostSample->gatewayLateFrameDrops : 0;
     const auto totalFramesDecoded = lastClient.framesDecoded;
     const auto totalFramesDropped = lastClient.framesDropped;
     const auto totalPacketsLost = lastClient.packetsLost;
@@ -327,12 +351,20 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << "  TV Frames Decoded:      " << totalFramesDecoded << "\n"
        << "  TV Frames Dropped:      " << totalFramesDropped << " ("
        << std::fixed << std::setprecision(2) << dropRate << "% drop rate)\n"
+       << "  Gateway Late Drops:     " << totalLateDrops << "\n"
        << "  Packets Lost (RTP):     " << totalPacketsLost << "\n\n"
        << "Performance Metrics Distribution:\n"
-       << formatDistributionLine("TV Decode Time", decodeDist, "ms")
-       << formatDistributionLine("Host Latency (Total)", hostLatencyDist, "ms")
+       << formatDistributionLine("TV Decode Time", decodeDist, "ms");
+    if (!activeSession_->rvfcProcessingSamples.empty()) {
+        ss << formatDistributionLine("TV RVFC Processing", rvfcProcDist, "ms");
+    }
+    if (!activeSession_->rvfcDelaySamples.empty()) {
+        ss << formatDistributionLine("TV RVFC Present Delay", rvfcDelayDist, "ms");
+    }
+    ss << formatDistributionLine("Host Latency (Total)", hostLatencyDist, "ms")
        << formatDistributionLine("Host Processing (Enc)", hostProcDist, "ms")
        << formatDistributionLine("Gateway Processing", gwLatencyDist, "ms")
+       << formatDistributionLine("Gateway Flatten Time", flattenDist, "ms")
        << formatDistributionLine("Network RTT", rttDist, "ms")
        << formatDistributionLine("Video RTP Jitter", videoJitterDist, "ms")
        << formatDistributionLine("TV Decoded FPS", clientFpsDist, " fps")

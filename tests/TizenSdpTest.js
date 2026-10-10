@@ -1,0 +1,84 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const rootDir = path.resolve(__dirname, "..");
+const appJsPath = path.join(rootDir, "tizen", "app.js");
+
+assert.ok(fs.existsSync(appJsPath), "tizen/app.js must exist");
+
+const appContent = fs.readFileSync(appJsPath, "utf8");
+
+// 1. Verify function definition and usage in app.js
+assert.ok(
+  appContent.includes("function injectVideoBandwidthSdp(sdp, bitrateKbps)"),
+  "app.js must define injectVideoBandwidthSdp"
+);
+assert.ok(
+  appContent.includes("injectVideoBandwidthSdp(answer.sdp, selectedSession.bitrateKbps)"),
+  "app.js must invoke injectVideoBandwidthSdp in handleOffer"
+);
+assert.ok(
+  appContent.includes("WebRTC video bandwidth cap (b=AS) negotiated in answer"),
+  "app.js must log bandwidth cap negotiation"
+);
+
+// 2. Extract function from app.js to test its exact logic
+const fnMatch = appContent.match(/function injectVideoBandwidthSdp\([\s\S]*?\n\}/);
+assert.ok(fnMatch, "injectVideoBandwidthSdp function body must match in app.js");
+const injectVideoBandwidthSdp = new Function("return " + fnMatch[0])();
+
+// Test 1: Empty or invalid input
+assert.strictEqual(injectVideoBandwidthSdp("", 50000), "");
+assert.strictEqual(injectVideoBandwidthSdp(null, 50000), null);
+assert.strictEqual(injectVideoBandwidthSdp("v=0\r\n", 0), "v=0\r\n");
+assert.strictEqual(injectVideoBandwidthSdp("v=0\r\n", -1), "v=0\r\n");
+
+// Test 2: Standard SDP without b=AS (inserts after c= line in video section)
+const sampleSdp =
+  "v=0\r\n" +
+  "o=- 12345 2 IN IP4 127.0.0.1\r\n" +
+  "s=-\r\n" +
+  "t=0 0\r\n" +
+  "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n" +
+  "c=IN IP4 0.0.0.0\r\n" +
+  "a=rtcp-mux\r\n" +
+  "a=rtpmap:96 AV1/90000\r\n" +
+  "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
+
+const injectedSdp = injectVideoBandwidthSdp(sampleSdp, 70000);
+assert.ok(
+  injectedSdp.includes("m=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\nb=AS:70000\r\n"),
+  "b=AS:70000 must be inserted after video c= line"
+);
+
+// Verify audio section does not have b=AS:70000
+const audioPart = injectedSdp.substring(injectedSdp.indexOf("m=audio"));
+assert.ok(!audioPart.includes("b=AS:70000"), "Audio section must not receive video bandwidth cap");
+
+// Test 3: Replacing existing b=AS in SDP
+const sdpWithExistingBas =
+  "v=0\r\n" +
+  "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n" +
+  "b=AS:30000\r\n" +
+  "a=rtpmap:96 AV1/90000\r\n";
+
+const replacedSdp = injectVideoBandwidthSdp(sdpWithExistingBas, 80000);
+assert.ok(replacedSdp.includes("b=AS:80000"), "Existing b=AS must be replaced with new bitrate");
+assert.ok(!replacedSdp.includes("b=AS:30000"), "Old b=AS value must be replaced");
+
+// Test 4: SDP with video line without c= line
+const sdpNoCLine =
+  "v=0\r\n" +
+  "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n" +
+  "a=rtpmap:96 AV1/90000\r\n";
+
+const injectedNoC = injectVideoBandwidthSdp(sdpNoCLine, 50000);
+assert.ok(
+  injectedNoC.includes("m=video 9 UDP/TLS/RTP/SAVPF 96\r\nb=AS:50000\r\n"),
+  "b=AS must be inserted directly after m=video line when c= is absent"
+);
+
+console.log("Tizen SDP bandwidth tests passed");

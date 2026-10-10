@@ -28,5 +28,7 @@ bool hasExpectedAv1FormatParameters(std::string_view sdp,
                                     int payloadType = 96);
 std::optional<int> hevcLevelId(std::string_view sdp, int payloadType = 96);
 std::optional<int> videoExtensionId(std::string_view sdp, std::string_view uri);
+std::optional<int> videoBandwidthKbps(std::string_view sdp);
+bool hasExpectedVideoBandwidth(std::string_view sdp, int expectedBitrateKbps);
 
 } // namespace gateway

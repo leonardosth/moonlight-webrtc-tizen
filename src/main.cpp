@@ -331,6 +331,7 @@ struct Session {
     std::string clientAddress;
     std::optional<std::string> wakeOnLanMacAddress;
     bool streamingActive = false;
+    bool rtpPlayoutDelayNegotiated = false;
 
     std::mutex sendMutex;
     std::mutex candidateMutex;
@@ -588,6 +589,15 @@ private:
                         currentSession->requestStreamingStop();
                         return;
                     }
+                    if (settings.bitrateKbps > 0
+                        && !gateway::hasExpectedVideoBandwidth(sdp, settings.bitrateKbps)) {
+                        log("WebRTC SDP video bandwidth (b=AS) validation failed");
+                        sendSessionStatus(currentSession,
+                                          "error",
+                                          "WebRTC SDP does not contain the requested video bandwidth");
+                        currentSession->requestStreamingStop();
+                        return;
+                    }
                     if (!hasDataChannelApplicationSection(sdp)) {
                         log("WebRTC data-channel SDP validation failed");
                         sendSessionStatus(currentSession,
@@ -597,6 +607,10 @@ private:
                         return;
                     }
 
+                    if (settings.bitrateKbps > 0) {
+                        log("WebRTC video bandwidth cap (b=AS:"
+                            + std::to_string(settings.bitrateKbps) + ") enabled");
+                    }
                     log("Samsung Game Mode SDP imageattr enabled");
                     log("WebRTC data-channel application section enabled");
                     log("Outgoing SDP m=video section:\n"
@@ -732,6 +746,12 @@ private:
             video.addExtMap(rtc::Description::Entry::ExtMap(
                 gateway::PreferredWebRtcColorSpaceExtensionId,
                 std::string(gateway::WebRtcColorSpaceExtensionUri)));
+        }
+        video.addExtMap(rtc::Description::Entry::ExtMap(
+            gateway::PreferredWebRtcPlayoutDelayExtensionId,
+            std::string(gateway::WebRtcPlayoutDelayExtensionUri)));
+        if (settings.bitrateKbps > 0) {
+            video.setBitrate(settings.bitrateKbps);
         }
         video.addSSRC(VideoSsrc, RtpCname, VideoMediaStreamId, "video");
 
@@ -927,10 +947,29 @@ private:
             params.bitrateKbps = session->settings.bitrateKbps;
             params.hdr = session->settings.hdr;
             params.audioChannels = session->settings.audioChannels;
-            params.latencyMode = "Lowest Latency (playoutDelayHint=0, jitterBufferTarget=0)";
+            const auto frameIntervalUs = session->settings.fps > 0
+                ? (1'000'000.0f / static_cast<float>(session->settings.fps))
+                : 16667.0f;
+            switch (session->settings.latencyMode) {
+            case gateway::LatencyMode::LowestLatency:
+                params.latencyMode = "Prefer Lowest Latency (1.5x deadline drop)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 1.5f);
+                break;
+            case gateway::LatencyMode::Balanced:
+                params.latencyMode = "Balanced (3.0x deadline drop)";
+                params.frameDeadlineUs = static_cast<std::uint64_t>(frameIntervalUs * 3.0f);
+                break;
+            case gateway::LatencyMode::Smoothest:
+                params.latencyMode = "Prefer Smoothest Video (drop disabled)";
+                params.frameDeadlineUs = 0;
+                break;
+            }
+            params.frameDropPolicy = params.frameDeadlineUs > 0;
             params.gameMode = true;
-            params.rtpPlayoutDelay = false;
+            params.rtpPlayoutDelay = session->rtpPlayoutDelayNegotiated;
             params.rvfc = true;
+            params.bufferPool = true;
+            params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 
@@ -1670,6 +1709,15 @@ private:
             if (data.contains("clientFrameJitterMs") && data["clientFrameJitterMs"].is_number()) {
                 clientSample.clientFrameJitterMs = data["clientFrameJitterMs"].get<double>();
             }
+            if (data.contains("rvfcProcessingMs") && data["rvfcProcessingMs"].is_number()) {
+                clientSample.rvfcProcessingMs = data["rvfcProcessingMs"].get<double>();
+            }
+            if (data.contains("rvfcExpectedDelayMs") && data["rvfcExpectedDelayMs"].is_number()) {
+                clientSample.rvfcExpectedDelayMs = data["rvfcExpectedDelayMs"].get<double>();
+            }
+            if (data.contains("rvfcPresentedFrames") && data["rvfcPresentedFrames"].is_number_unsigned()) {
+                clientSample.rvfcPresentedFrames = data["rvfcPresentedFrames"].get<std::uint64_t>();
+            }
 
             std::optional<gateway::telemetry::HostTelemetrySample> hostSample;
             std::shared_ptr<gateway::moonlight::MoonlightSession> moonlight;
@@ -1687,8 +1735,10 @@ private:
                     sample.hostFrameJitterMs = diag->hostFrameJitterMs;
                     sample.hostProcessingLatencyMs = diag->hostProcessingLatencyMs;
                     sample.gatewayLatencyMs = diag->gatewayLatencyMs;
+                    sample.flattenTimeMs = diag->flattenTimeMs;
                     sample.totalHostLatencyMs = diag->totalHostLatencyMs;
                     sample.totalFrames = diag->totalFrames;
+                    sample.gatewayLateFrameDrops = diag->lateFrameDrops;
                     hostSample = sample;
                 }
             }
@@ -2149,6 +2199,22 @@ private:
         } else {
             gateway::disableRtpColorSpace(session->videoRtpConfiguration);
         }
+
+        const auto playoutDelayId = gateway::videoExtensionId(
+            sdp, gateway::WebRtcPlayoutDelayExtensionUri);
+        if (playoutDelayId) {
+            session->rtpPlayoutDelayNegotiated = true;
+            gateway::configurePlayoutDelayRtp(
+                session->videoRtpConfiguration, *playoutDelayId, 0, 0);
+            log("WebRTC RTP playout-delay extension: NEGOTIATED & ACTIVE, id="
+                + std::to_string(*playoutDelayId)
+                + " (min=0ms, max=0ms)");
+        } else {
+            session->rtpPlayoutDelayNegotiated = false;
+            gateway::disablePlayoutDelayRtp(session->videoRtpConfiguration);
+            log("WebRTC RTP playout-delay extension: NOT NEGOTIATED by client");
+        }
+
         peerConnection->setRemoteDescription(rtc::Description(sdp, "answer"));
 
         std::vector<PendingCandidate> pendingCandidates;
