@@ -362,6 +362,7 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
             log("Moonlight IDR frame observed after keyframe request");
         }
         pendingIdrDeferred_.store(false, std::memory_order_release);
+        moonlightIdrRequested_.store(false, std::memory_order_release);
     }
 
     // Determine if AV1 Temporal Delimiter OBU (0x12, 0x00) should be prepended
@@ -477,13 +478,6 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     }
 
     sender_.sendVideoAccessUnit(settings_.codec, flattened, decodeUnit->rtpTimestamp);
-
-    if (decodeUnit->frameType == FRAME_TYPE_IDR) {
-        pendingIdrDeferred_.store(false, std::memory_order_release);
-        if (waitingForMoonlightIdr_.exchange(false, std::memory_order_acq_rel)) {
-            log("Moonlight IDR frame observed after keyframe request");
-        }
-    }
 
     const auto frames = videoFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
     const auto bytes = videoBytes_.fetch_add(flattened.size(), std::memory_order_relaxed)

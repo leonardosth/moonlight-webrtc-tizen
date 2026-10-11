@@ -1827,26 +1827,33 @@ function injectVideoBandwidthSdp(sdp, bitrateKbps) {
   if (!sdp || typeof sdp !== "string" || !bitrateKbps || bitrateKbps <= 0) {
     return sdp;
   }
+  const integerBitrate = Math.round(Number(bitrateKbps));
+  if (!Number.isFinite(integerBitrate) || integerBitrate <= 0) {
+    return sdp;
+  }
   if (sdp.indexOf("b=AS:") !== -1) {
-    return sdp.replace(/b=AS:\d+/g, "b=AS:" + String(bitrateKbps));
+    return sdp.replace(/b=AS:\d+/g, "b=AS:" + integerBitrate);
   }
   const videoIndex = sdp.indexOf("m=video");
   if (videoIndex === -1) {
     return sdp;
   }
-  const nextLineEnd = sdp.indexOf("\r\n", videoIndex);
+  const isCrlf = sdp.indexOf("\r\n") !== -1;
+  const lineEnding = isCrlf ? "\r\n" : "\n";
+  const lineEndLen = lineEnding.length;
+  const nextLineEnd = sdp.indexOf(lineEnding, videoIndex);
   if (nextLineEnd === -1) {
     return sdp;
   }
-  const afterVideo = sdp.substring(nextLineEnd + 2);
-  let insertIndex = nextLineEnd + 2;
+  const afterVideo = sdp.substring(nextLineEnd + lineEndLen);
+  let insertIndex = nextLineEnd + lineEndLen;
   if (afterVideo.indexOf("c=") === 0) {
-    const cLineEnd = afterVideo.indexOf("\r\n");
+    const cLineEnd = afterVideo.indexOf(lineEnding);
     if (cLineEnd !== -1) {
-      insertIndex = nextLineEnd + 2 + cLineEnd + 2;
+      insertIndex = nextLineEnd + lineEndLen + cLineEnd + lineEndLen;
     }
   }
-  return sdp.slice(0, insertIndex) + "b=AS:" + String(bitrateKbps) + "\r\n" + sdp.slice(insertIndex);
+  return sdp.slice(0, insertIndex) + "b=AS:" + integerBitrate + lineEnding + sdp.slice(insertIndex);
 }
 
 async function handleOffer(message) {

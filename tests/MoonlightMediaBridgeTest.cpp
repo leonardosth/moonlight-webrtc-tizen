@@ -343,6 +343,163 @@ int main()
                     "Jittered P-frame in Balanced mode must not increment lateFrameDrops");
         }
 
+        // Edge Case: Null and malformed decode units must be rejected safely without crashing
+        {
+            RecordingMediaSender malformedSender;
+            gateway::MoonlightMediaBridge malformedBridge(
+                malformedSender,
+                gateway::defaultStreamSettings(),
+                [](const std::string&) {});
+            auto* malformedCallbacks = malformedBridge.videoCallbacks();
+            require(malformedCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &malformedBridge, 0) == 0,
+                    "H.264 setup on malformedBridge failed");
+            malformedCallbacks->start();
+
+            require(malformedCallbacks->submitDecodeUnit(nullptr) == DR_NEED_IDR,
+                    "Null decode unit must safely return DR_NEED_IDR");
+
+            DECODE_UNIT nullBufferUnit = pframeUnit;
+            nullBufferUnit.bufferList = nullptr;
+            require(malformedCallbacks->submitDecodeUnit(&nullBufferUnit) == DR_NEED_IDR,
+                    "Decode unit with null bufferList must return DR_NEED_IDR");
+
+            LENTRY emptyDesc{ nullptr, nullptr, 0, BUFFER_TYPE_PICDATA };
+            DECODE_UNIT emptyBufferUnit = pframeUnit;
+            emptyBufferUnit.bufferList = &emptyDesc;
+            require(malformedCallbacks->submitDecodeUnit(&emptyBufferUnit) == DR_NEED_IDR,
+                    "Decode unit with 0-length bufferList must return DR_NEED_IDR");
+        }
+
+        // Edge Case: FrameDropPolicy::Disabled under LowestLatency must NEVER drop late frames
+        {
+            RecordingMediaSender disabledDropSender;
+            auto disabledSettings = gateway::defaultStreamSettings();
+            disabledSettings.latencyMode = gateway::LatencyMode::LowestLatency;
+            disabledSettings.frameDropPolicy = gateway::FrameDropPolicy::Disabled;
+            disabledSettings.fps = 60;
+            gateway::MoonlightMediaBridge disabledDropBridge(
+                disabledDropSender,
+                disabledSettings,
+                [](const std::string&) {});
+            auto* disabledCallbacks = disabledDropBridge.videoCallbacks();
+            require(disabledCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &disabledDropBridge, 0) == 0,
+                    "H.264 setup on disabledDropBridge failed");
+            disabledCallbacks->start();
+            require(disabledDropBridge.frameDeadlineUs() == 0,
+                    "frameDeadlineUs must be 0 when frameDropPolicy is Disabled, even in LowestLatency");
+
+            DECODE_UNIT ancientPframe = pframeUnit;
+            ancientPframe.receiveTimeUs = 1; // ancient timestamp
+            require(disabledCallbacks->submitDecodeUnit(&ancientPframe) == DR_OK,
+                    "FrameDropPolicy::Disabled must never drop late frames");
+            require(disabledDropBridge.lateFrameDrops() == 0,
+                    "Disabled frameDropPolicy must maintain 0 lateFrameDrops");
+        }
+
+        // Edge Case: FrameDropPolicy::Strict under 60fps enforces strict 1.5x frame interval (25ms)
+        {
+            RecordingMediaSender strictSender;
+            auto strictSettings = gateway::defaultStreamSettings();
+            strictSettings.latencyMode = gateway::LatencyMode::Smoothest; // Smoothest default is 0
+            strictSettings.frameDropPolicy = gateway::FrameDropPolicy::Strict; // Strict overrides it
+            strictSettings.fps = 60;
+            gateway::MoonlightMediaBridge strictBridge(
+                strictSender,
+                strictSettings,
+                [](const std::string&) {});
+            auto* strictCallbacks = strictBridge.videoCallbacks();
+            require(strictCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &strictBridge, 0) == 0,
+                    "H.264 setup on strictBridge failed");
+            strictCallbacks->start();
+            require(strictBridge.frameDeadlineUs() == 25000,
+                    "Strict frame drop policy must enforce exactly 1.5x frame interval (25ms @ 60fps)");
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            const auto currentPlt = PltGetMicroseconds();
+            DECODE_UNIT latePframe = pframeUnit;
+            latePframe.receiveTimeUs = currentPlt > 30000 ? (currentPlt - 30000) : 1;
+            require(strictCallbacks->submitDecodeUnit(&latePframe) == DR_NEED_IDR,
+                    "Strict policy must drop frame with age 30ms > 25ms deadline and request IDR");
+            require(strictBridge.lateFrameDrops() == 1,
+                    "Strict late frame drop must increment lateFrameDrops counter");
+        }
+
+        // Edge Case: Burst of rapid WebRTC keyframe requests during cooldown
+        {
+            RecordingMediaSender burstSender;
+            gateway::MoonlightMediaBridge burstBridge(
+                burstSender,
+                gateway::defaultStreamSettings(),
+                [](const std::string&) {});
+            auto* burstCallbacks = burstBridge.videoCallbacks();
+            require(burstCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &burstBridge, 0) == 0,
+                    "H.264 setup on burstBridge failed");
+            burstCallbacks->start();
+
+            // 1st request of burst is forwarded
+            burstBridge.onWebRtcKeyframeRequest();
+            require(burstCallbacks->submitDecodeUnit(&pframeUnit) == DR_NEED_IDR,
+                    "First request of burst outside cooldown must be forwarded");
+
+            // Subsequents requests in the burst are within cooldown and must be throttled
+            const auto throttledBefore = burstBridge.keyframeRequestsThrottled();
+            for (int i = 0; i < 5; ++i) {
+                burstBridge.onWebRtcKeyframeRequest();
+            }
+            require(burstBridge.hasPendingIdrRequest(),
+                    "hasPendingIdrRequest must be true during cooldown burst");
+            const auto submitRes = burstCallbacks->submitDecodeUnit(&pframeUnit);
+            require(submitRes == DR_OK,
+                    "Burst requests within cooldown must be throttled");
+            require(burstBridge.keyframeRequestsThrottled() > throttledBefore,
+                    "Keyframe throttle counter must increment during request burst");
+
+            // Arriving IDR clears both in-flight and deferred requests
+            require(burstCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                    "IDR frame must be accepted after burst");
+            require(!burstBridge.hasPendingIdrRequest(),
+                    "Arriving IDR must clear all pending/deferred burst requests");
+        }
+
+        // Edge Case: Concurrent multi-threaded keyframe requests
+        {
+            RecordingMediaSender stressSender;
+            gateway::MoonlightMediaBridge stressBridge(
+                stressSender,
+                gateway::defaultStreamSettings(),
+                [](const std::string&) {});
+            auto* stressCallbacks = stressBridge.videoCallbacks();
+            require(stressCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &stressBridge, 0) == 0,
+                    "H.264 setup on stressBridge failed");
+            stressCallbacks->start();
+
+            std::vector<std::thread> threads;
+            for (int t = 0; t < 4; ++t) {
+                threads.emplace_back([&stressBridge]() {
+                    for (int req = 0; req < 25; ++req) {
+                        stressBridge.onWebRtcKeyframeRequest();
+                        std::this_thread::yield();
+                    }
+                });
+            }
+
+            for (int i = 0; i < 30; ++i) {
+                stressCallbacks->submitDecodeUnit(&pframeUnit);
+                if (i % 5 == 0) {
+                    stressCallbacks->submitDecodeUnit(&idrUnit);
+                }
+            }
+
+            for (auto& th : threads) {
+                th.join();
+            }
+
+            require(stressBridge.keyframeRequestsReceived() >= 100,
+                    "Stress tested keyframe requests must be received");
+            require(stressCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                    "Bridge must remain in healthy state after concurrent stress");
+        }
+
         auto* audioCallbacks = bridge.audioCallbacks();
         OPUS_MULTISTREAM_CONFIGURATION unsupportedAudio{};
         unsupportedAudio.sampleRate = 48000;

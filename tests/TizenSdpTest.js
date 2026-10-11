@@ -85,4 +85,38 @@ assert.ok(
   "b=AS must be inserted directly after m=video line when c= is absent"
 );
 
+// Test 5: Headroom calculations (25%) across resolution/bitrate spectrum
+const testBitrates = [500, 10000, 50000, 60000, 70000, 80000, 100000, 200000];
+for (const br of testBitrates) {
+  const cap = Math.round(br * 1.25);
+  const result = injectVideoBandwidthSdp(sampleSdp, cap);
+  assert.ok(result.includes("b=AS:" + cap + "\r\n"), "Headroom cap " + cap + " must be present in SDP for " + br + " kbps");
+}
+
+// Test 6: Fractional / decimal bitrates rounding
+const fracSdp = injectVideoBandwidthSdp(sampleSdp, 87500.6);
+assert.ok(fracSdp.includes("b=AS:87501\r\n"), "Floating-point bitrates must be rounded to integer");
+
+// Test 7: SDP with Unix line endings (\n)
+const unixSdp = "v=0\nm=video 9 UDP/TLS/RTP/SAVPF 96\nc=IN IP4 0.0.0.0\na=rtpmap:96 AV1/90000\n";
+const unixInjected = injectVideoBandwidthSdp(unixSdp, 75000);
+assert.ok(unixInjected.includes("b=AS:75000"), "b=AS must be correctly inserted into SDP with Unix line endings");
+
+// Test 8: SDP with Audio only (no m=video)
+const audioOnlySdp =
+  "v=0\r\n" +
+  "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n" +
+  "c=IN IP4 0.0.0.0\r\n" +
+  "a=rtpmap:111 opus/48000/2\r\n";
+const audioResult = injectVideoBandwidthSdp(audioOnlySdp, 70000);
+assert.strictEqual(audioResult, audioOnlySdp, "Audio-only SDP must remain untouched");
+
+// Test 9: Idempotence (repeated calls must not duplicate b=AS lines)
+const once = injectVideoBandwidthSdp(sampleSdp, 80000);
+const twice = injectVideoBandwidthSdp(once, 80000);
+assert.strictEqual(once, twice, "Subsequent calls with same bitrate must be idempotent");
+const matches = twice.match(/b=AS:80000/g);
+assert.strictEqual(matches.length, 1, "There must be exactly one b=AS line in the video section");
+
 console.log("Tizen SDP bandwidth tests passed");
+
