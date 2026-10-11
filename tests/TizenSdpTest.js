@@ -17,8 +17,12 @@ assert.ok(
   "app.js must define injectVideoBandwidthSdp"
 );
 assert.ok(
-  appContent.includes("injectVideoBandwidthSdp(answer.sdp, selectedSession.bitrateKbps)"),
-  "app.js must invoke injectVideoBandwidthSdp in handleOffer"
+  appContent.includes("const bandwidthCapKbps = Math.round(selectedSession.bitrateKbps * 1.25);"),
+  "app.js must calculate bandwidthCapKbps with 25% headroom for packet/retransmission overhead"
+);
+assert.ok(
+  appContent.includes("injectVideoBandwidthSdp(answer.sdp, bandwidthCapKbps)"),
+  "app.js must invoke injectVideoBandwidthSdp with bandwidthCapKbps in handleOffer"
 );
 assert.ok(
   appContent.includes("WebRTC video bandwidth cap (b=AS) negotiated in answer"),

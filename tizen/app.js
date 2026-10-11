@@ -1867,7 +1867,9 @@ async function handleOffer(message) {
     const answer = await peerConnection.createAnswer();
     let localAnswer = answer;
     if (selectedSession && selectedSession.bitrateKbps > 0) {
-      const modifiedSdp = injectVideoBandwidthSdp(answer.sdp, selectedSession.bitrateKbps);
+      // Add 25% headroom to account for RTP/UDP/IP header overhead and natural video burst entropy (RFC 3556)
+      const bandwidthCapKbps = Math.round(selectedSession.bitrateKbps * 1.25);
+      const modifiedSdp = injectVideoBandwidthSdp(answer.sdp, bandwidthCapKbps);
       try {
         localAnswer = (typeof RTCSessionDescription !== "undefined")
           ? new RTCSessionDescription({ type: "answer", sdp: modifiedSdp })
@@ -2021,7 +2023,7 @@ const PACKET_PACING_DESCRIPTIONS = {
 
 const STREAMING_PRESET_DESCRIPTIONS = {
   custom: "Custom — Ajustes manuais de entrega, criptografia, buffers e políticas de descarte.",
-  ultra_low_latency: "Ultra-Low Latency — Entrega acelerada (~4ms), loopback sem criptografia, zero buffer e sem drops para cabo LAN.",
+  ultra_low_latency: "Ultra-Low Latency (Cabo LAN Direto) — Entrega imediata sem pacer, buffer de 8ms para absorver retransmissões NACK sem engasgos, sem criptografia loopback e sem drops.",
   fast_wifi: "Fast Wi-Fi — Pacing rápido, sem criptografia em LAN, buffer de 8ms e descarte tolerante para Wi-Fi 5/6 GHz.",
   balanced: "Balanced — Configuração padrão recomendada: criptografia ativa, pacer suave e buffer de 15ms.",
   max_stability: "Max Stability — Pacing espalhado, buffer resiliente de 30ms/80ms e pacotes de 1200B contra perda severa.",
@@ -2127,13 +2129,14 @@ function applyStreamingPreset(preset) {
     return;
   }
   if (preset === "ultra_low_latency") {
-    if (packetPacingSelect) packetPacingSelect.value = "fast";
+    if (latencyModeSelect) latencyModeSelect.value = "lowest_latency";
+    if (packetPacingSelect) packetPacingSelect.value = "disabled";
     if (encryptionSelect) encryptionSelect.value = "false";
     if (frameDropPolicySelect) frameDropPolicySelect.value = "disabled";
-    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "0";
-    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "15";
-    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1420";
-    if (idrCooldownSelect) idrCooldownSelect.value = "250";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "8";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
+    if (idrCooldownSelect) idrCooldownSelect.value = "750";
   } else if (preset === "fast_wifi") {
     if (packetPacingSelect) packetPacingSelect.value = "fast";
     if (encryptionSelect) encryptionSelect.value = "false";
@@ -2159,6 +2162,7 @@ function applyStreamingPreset(preset) {
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
     if (idrCooldownSelect) idrCooldownSelect.value = "750";
   }
+  updateLatencyModeStatus();
   updatePacketPacingStatus();
   updateEncryptionStatus();
   updateFrameDropPolicyStatus();

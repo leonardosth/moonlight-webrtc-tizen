@@ -224,6 +224,20 @@ int main()
         require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
                 "Moonlight IDR after deferred request was not accepted");
 
+        // Test that arriving IDR clears deferred keyframe request and suppresses redundant IDR
+        bridge.onWebRtcKeyframeRequest();
+        require(bridge.hasPendingIdrRequest(), "Third IDR request flag was not set");
+        require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
+                "Request within cooldown must be throttled");
+        require(bridge.hasPendingIdrRequest(), "Deferred flag must be set during cooldown");
+        require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                "Arriving IDR must be accepted");
+        require(!bridge.hasPendingIdrRequest(),
+                "Arriving IDR must clear deferred IDR flag");
+        std::this_thread::sleep_for(std::chrono::milliseconds(550));
+        require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
+                "Redundant keyframe request must NOT be forwarded if IDR arrived during cooldown");
+
         // Test frame deadline drop policy in LowestLatency mode
         {
             RecordingMediaSender dropSender;

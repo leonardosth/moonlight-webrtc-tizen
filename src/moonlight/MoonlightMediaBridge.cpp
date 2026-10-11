@@ -357,6 +357,13 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         }
     }
 
+    if (decodeUnit->frameType == FRAME_TYPE_IDR) {
+        if (waitingForMoonlightIdr_.exchange(false, std::memory_order_acq_rel)) {
+            log("Moonlight IDR frame observed after keyframe request");
+        }
+        pendingIdrDeferred_.store(false, std::memory_order_release);
+    }
+
     // Determine if AV1 Temporal Delimiter OBU (0x12, 0x00) should be prepended
     std::span<const std::uint8_t> prefix;
     constexpr std::uint8_t obuTemporalDelimiter[] = { 0x12, 0x00 };
@@ -632,33 +639,41 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
     const auto cooldownMs = idrCooldownMs_.load(std::memory_order_relaxed);
 
     if (moonlightIdrRequested_.exchange(false, std::memory_order_acq_rel)) {
-        const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
-            ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
-            : std::chrono::milliseconds::max().count();
-
-        if (elapsedMs < cooldownMs) {
+        if (waitingForMoonlightIdr_.load(std::memory_order_acquire)) {
             keyframeRequestsThrottled_.fetch_add(1, std::memory_order_relaxed);
-            pendingIdrDeferred_.store(true, std::memory_order_release);
         } else {
-            lastIdrForwardedTime_ = nowSteady;
-            waitingForMoonlightIdr_.store(true, std::memory_order_release);
-            pendingIdrDeferred_.store(false, std::memory_order_release);
-            keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
-            log("WebRTC keyframe request forwarded to Moonlight");
-            return DR_NEED_IDR;
+            const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
+                ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
+                : std::chrono::milliseconds::max().count();
+
+            if (elapsedMs < cooldownMs) {
+                keyframeRequestsThrottled_.fetch_add(1, std::memory_order_relaxed);
+                pendingIdrDeferred_.store(true, std::memory_order_release);
+            } else {
+                lastIdrForwardedTime_ = nowSteady;
+                waitingForMoonlightIdr_.store(true, std::memory_order_release);
+                pendingIdrDeferred_.store(false, std::memory_order_release);
+                keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
+                log("WebRTC keyframe request forwarded to Moonlight");
+                return DR_NEED_IDR;
+            }
         }
     } else if (pendingIdrDeferred_.load(std::memory_order_acquire)) {
-        const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
-            ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
-            : std::chrono::milliseconds::max().count();
-
-        if (elapsedMs >= cooldownMs) {
-            lastIdrForwardedTime_ = nowSteady;
-            waitingForMoonlightIdr_.store(true, std::memory_order_release);
+        if (waitingForMoonlightIdr_.load(std::memory_order_acquire)) {
             pendingIdrDeferred_.store(false, std::memory_order_release);
-            keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
-            log("Deferred WebRTC keyframe request forwarded to Moonlight after cooldown");
-            return DR_NEED_IDR;
+        } else {
+            const auto elapsedMs = lastIdrForwardedTime_.time_since_epoch().count() > 0
+                ? std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - lastIdrForwardedTime_).count()
+                : std::chrono::milliseconds::max().count();
+
+            if (elapsedMs >= cooldownMs) {
+                lastIdrForwardedTime_ = nowSteady;
+                waitingForMoonlightIdr_.store(true, std::memory_order_release);
+                pendingIdrDeferred_.store(false, std::memory_order_release);
+                keyframeRequestsForwarded_.fetch_add(1, std::memory_order_relaxed);
+                log("Deferred WebRTC keyframe request forwarded to Moonlight after cooldown");
+                return DR_NEED_IDR;
+            }
         }
     }
 
