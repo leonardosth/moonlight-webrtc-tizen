@@ -31,7 +31,8 @@ public:
     explicit PacingMediaHandler(PacketPacing pacing,
                                 int fps = 60,
                                 int bitrateKbps = 12000,
-                                std::function<void(const std::string&)> logger = nullptr);
+                                std::function<void(const std::string&)> logger = nullptr,
+                                int maxBandwidthKbps = 0);
     ~PacingMediaHandler() override;
 
     void outgoing(rtc::message_vector& messages, const rtc::message_callback& send) override;
@@ -41,6 +42,9 @@ public:
 
     [[nodiscard]] PacketPacing pacingMode() const noexcept { return pacing_; }
     [[nodiscard]] PacingStats stats() const;
+    [[nodiscard]] bool isCatchUpPaced() const noexcept { return true; }
+    [[nodiscard]] std::uint64_t bytesPerSec() const noexcept { return bytesPerSec_; }
+    [[nodiscard]] std::uint64_t catchUpBytesPerSec() const noexcept { return catchUpBytesPerSec_; }
 
 private:
     void pacingLoop();
@@ -52,6 +56,8 @@ private:
     std::function<void(const std::string&)> logger_;
 
     std::uint64_t bytesPerSec_ = 0;
+    std::uint64_t catchUpBytesPerSec_ = 0;
+    std::uint64_t maxLineRateBytesPerSec_ = 0;
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;

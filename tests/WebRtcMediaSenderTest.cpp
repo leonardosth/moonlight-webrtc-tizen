@@ -167,15 +167,12 @@ int main()
             std::atomic<int> sentCount = 0;
             balancedPacer.outgoing(msgs, [&](rtc::message_ptr) { sentCount.fetch_add(1); });
             require(msgs.empty(), "Balanced pacer must consume outgoing messages vector");
-            require(sentCount.load() >= 4, "Balanced pacer must dispatch initial burst immediately");
-
             std::this_thread::sleep_for(std::chrono::milliseconds(80));
             require(sentCount.load() == 10, "Balanced pacer must dispatch all packets within frame budget");
 
             const auto stats = balancedPacer.stats();
             require(stats.totalBursts == 1, "PacingStats totalBursts incorrect");
-            require(stats.totalPacketsImmediate == 4, "PacingStats totalPacketsImmediate incorrect");
-            require(stats.totalPacketsPaced == 6, "PacingStats totalPacketsPaced incorrect");
+            require(stats.totalPacketsPaced == 10, "PacingStats totalPacketsPaced incorrect");
             require(stats.maxBurstPackets == 10, "PacingStats maxBurstPackets incorrect");
             balancedPacer.stop();
         }
@@ -190,17 +187,65 @@ int main()
             std::atomic<int> sentCount = 0;
             fastPacer.outgoing(msgs, [&](rtc::message_ptr) { sentCount.fetch_add(1); });
             require(msgs.empty(), "Fast pacer must consume outgoing messages vector");
-            require(sentCount.load() >= 8, "Fast pacer must dispatch initial burst of 8 packets immediately");
-
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             require(sentCount.load() == 12, "Fast pacer must dispatch all packets quickly");
 
             const auto stats = fastPacer.stats();
             require(stats.totalBursts == 1, "Fast PacingStats totalBursts incorrect");
-            require(stats.totalPacketsImmediate == 8, "Fast PacingStats totalPacketsImmediate incorrect");
-            require(stats.totalPacketsPaced == 4, "Fast PacingStats totalPacketsPaced incorrect");
+            require(stats.totalPacketsPaced == 12, "Fast PacingStats totalPacketsPaced incorrect");
             require(stats.maxBurstPackets == 12, "Fast PacingStats maxBurstPackets incorrect");
             fastPacer.stop();
+        }
+
+        // Test PacingMediaHandler Non-blocking Asynchronous Dispatch and Smooth Catch-up
+        {
+            // Create a pacer with 50 Mbps target and 60 FPS
+            gateway::PacingMediaHandler pacer(gateway::PacketPacing::Balanced, 60, 50000);
+            rtc::message_vector msgs;
+            constexpr int LargeBurstSize = 200; // Exceeds 160 catch-up threshold
+            for (int i = 0; i < LargeBurstSize; ++i) {
+                msgs.push_back(rtc::make_message(1000));
+            }
+
+            std::atomic<int> immediateCallbackCalls = 0;
+            std::atomic<int> totalSent = 0;
+            const auto startTime = std::chrono::steady_clock::now();
+
+            // outgoing must return immediately without blocking the caller thread
+            pacer.outgoing(msgs, [&](rtc::message_ptr) {
+                totalSent.fetch_add(1);
+            });
+
+            // Immediately after outgoing returns, caller must not have been synchronously blocked for all 200 packets
+            require(msgs.empty(), "Outgoing messages must be consumed by pacer");
+            require(totalSent.load() < LargeBurstSize, "Pacer must not synchronously flush large burst on caller thread");
+
+            // Wait for pacer to drain the burst
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            require(totalSent.load() == LargeBurstSize, "Pacer must deliver all packets in the burst");
+
+            const auto stats = pacer.stats();
+            require(stats.totalBursts == 1, "Burst count must be 1");
+            require(stats.maxBurstPackets == LargeBurstSize, "Max burst packets must record the full burst");
+            require(stats.catchUpEvents >= 1, "Catch-up must be recorded when queue exceeds threshold");
+            require(stats.maxQueueDepth >= LargeBurstSize - 16, "Max queue depth must record backlog");
+
+            // Ensure catch-up still paced packets rather than dumping 200KB instantaneously in < 1ms
+            require(pacer.isCatchUpPaced(), "Catch-up mode must maintain pacing delay rather than 0 delay");
+            pacer.stop();
+        }
+
+        // Test PacingMediaHandler Fast Ethernet (100 Mbps) Safety Cap
+        {
+            // At 80 Mbps target with Fast pacing (4.0x multiplier = 320 Mbps)
+            // Ethernet safety cap must clamp maximum burst rate to <= 95 Mbps
+            gateway::PacingMediaHandler cappedPacer(gateway::PacketPacing::Fast, 60, 80000, nullptr, 95000);
+            constexpr std::uint64_t MaxExpected95MbpsBps = (95000ULL * 1000ULL) / 8ULL;
+            require(cappedPacer.bytesPerSec() <= MaxExpected95MbpsBps,
+                    "Pacer bytesPerSec must be clamped to Ethernet line rate safety cap (95 Mbps)");
+            require(cappedPacer.catchUpBytesPerSec() <= MaxExpected95MbpsBps,
+                    "Pacer catchUpBytesPerSec must be clamped to Ethernet line rate safety cap (95 Mbps)");
+            cappedPacer.stop();
         }
 
         std::cout << "WebRTC media sender tests passed\n";

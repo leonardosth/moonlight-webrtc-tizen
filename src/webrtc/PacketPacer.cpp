@@ -18,7 +18,8 @@ namespace gateway {
 PacingMediaHandler::PacingMediaHandler(PacketPacing pacing,
                                        int fps,
                                        int bitrateKbps,
-                                       std::function<void(const std::string&)> logger)
+                                       std::function<void(const std::string&)> logger,
+                                       int maxBandwidthKbps)
     : pacing_(pacing)
     , fps_(fps > 0 ? fps : 60)
     , bitrateKbps_(bitrateKbps > 0 ? bitrateKbps : 12000)
@@ -39,6 +40,26 @@ PacingMediaHandler::PacingMediaHandler(PacketPacing pacing,
         bytesPerSec_ = static_cast<std::uint64_t>(targetBps / 8.0);
         if (bytesPerSec_ == 0) {
             bytesPerSec_ = 2'500'000; // 20 Mbps default fallback
+        }
+
+        // Catch-up pacing rate: accelerated (1.25x - 1.35x), but ALWAYS with pacing delay.
+        // Never zero delay so network buffers don't get blown up.
+        const double catchUpMultiplier = std::max(multiplier * 1.15, 1.25);
+        catchUpBytesPerSec_ = static_cast<std::uint64_t>((static_cast<double>(bitrateKbps_) * 1000.0 * catchUpMultiplier) / 8.0);
+
+        // Line-rate safety cap: On 100 Mbps Ethernet (common on Samsung TVs),
+        // instantaneous rate exceeding ~95 Mbps will overflow switch/TV PHY buffers.
+        // If maxBandwidthKbps is provided (>0), cap rate to that; otherwise if bitrate <= 85 Mbps,
+        // cap to 95 Mbps to guarantee no Fast Ethernet port overflow.
+        const int effectiveCapKbps = (maxBandwidthKbps > 0) ? maxBandwidthKbps : (bitrateKbps_ <= 85000 ? 95000 : 0);
+        if (effectiveCapKbps > 0) {
+            maxLineRateBytesPerSec_ = static_cast<std::uint64_t>((static_cast<double>(effectiveCapKbps) * 1000.0) / 8.0);
+            if (bytesPerSec_ > maxLineRateBytesPerSec_) {
+                bytesPerSec_ = maxLineRateBytesPerSec_;
+            }
+            if (catchUpBytesPerSec_ > maxLineRateBytesPerSec_) {
+                catchUpBytesPerSec_ = maxLineRateBytesPerSec_;
+            }
         }
 
         worker_ = std::thread([this] { pacingLoop(); });
@@ -90,36 +111,19 @@ void PacingMediaHandler::outgoing(rtc::message_vector& messages, const rtc::mess
         stats_.maxBurstPackets = std::max(stats_.maxBurstPackets, static_cast<std::uint64_t>(count));
     }
 
-    // Initial burst (Head-of-Line packet delivery):
-    // For Fast pacing, dispatch 8 packets immediately so decoding starts right away.
-    // For Balanced/Aggressive, dispatch 4 packets (SPS/PPS/temporal delimiter and initial slice).
-    const std::size_t initialBurstCount = (pacing_ == PacketPacing::Fast) ? 8 : 4;
-    const std::size_t immediateCount = std::min(count, initialBurstCount);
-
-    for (std::size_t i = 0; i < immediateCount; ++i) {
-        if (send && messages[i]) {
-            try {
-                send(std::move(messages[i]));
-            } catch (...) {}
-        }
-    }
+    // Fully asynchronous: enqueue all messages to the worker thread without blocking the calling thread.
+    // The worker thread immediately starts draining the first batch (Head-of-Line),
+    // ensuring sub-millisecond dispatch while isolating the Moonlight pipeline from network socket latency.
     {
-        const std::lock_guard statsLock(statsMutex_);
-        stats_.totalPacketsImmediate += immediateCount;
-    }
-
-    if (count > immediateCount) {
-        {
-            const std::lock_guard lock(mutex_);
-            sendCallback_ = send;
-            for (std::size_t i = immediateCount; i < count; ++i) {
-                if (messages[i]) {
-                    queue_.push_back(std::move(messages[i]));
-                }
+        const std::lock_guard lock(mutex_);
+        sendCallback_ = send;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (messages[i]) {
+                queue_.push_back(std::move(messages[i]));
             }
         }
-        cv_.notify_one();
     }
+    cv_.notify_one();
 
     // Clear messages so Track::outgoing does not transmit them in a single unpaced burst
     messages.clear();
@@ -202,8 +206,12 @@ void PacingMediaHandler::pacingLoop()
             stats_.totalPacketsPaced += batch.size();
         }
 
-        if (!catchUp && bytesPerSec_ > 0 && batchBytes > 0) {
-            const auto delayUs = std::chrono::microseconds((batchBytes * 1'000'000ULL) / bytesPerSec_);
+        // Pacing delay calculation:
+        // In catch-up mode, use catchUpBytesPerSec_ (accelerated drain rate) instead of 0 delay.
+        // This ensures packets are still paced smoothly and never overwhelm 100 Mbps Ethernet switches or TV buffers.
+        const std::uint64_t effectiveBytesPerSec = catchUp ? catchUpBytesPerSec_ : bytesPerSec_;
+        if (effectiveBytesPerSec > 0 && batchBytes > 0) {
+            const auto delayUs = std::chrono::microseconds((batchBytes * 1'000'000ULL) / effectiveBytesPerSec);
             const auto targetTime = std::chrono::steady_clock::now() + delayUs;
 
             if (delayUs >= std::chrono::milliseconds(1)) {
