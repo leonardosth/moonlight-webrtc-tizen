@@ -69,7 +69,7 @@
     if (typeof candidate.frameInterpolation === "boolean") {
       values.frameInterpolation = candidate.frameInterpolation;
     }
-    if (typeof candidate.streamingPreset === "string" && (candidate.streamingPreset === "custom" || candidate.streamingPreset === "ultra_low_latency" || candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "balanced" || candidate.streamingPreset === "max_stability")) {
+    if (typeof candidate.streamingPreset === "string" && (candidate.streamingPreset === "custom" || candidate.streamingPreset === "ultra_low_latency" || candidate.streamingPreset === "ethernet_100m" || candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "balanced" || candidate.streamingPreset === "max_stability")) {
       values.streamingPreset = candidate.streamingPreset;
     }
     if (typeof candidate.sunshineEncryption === "boolean") {

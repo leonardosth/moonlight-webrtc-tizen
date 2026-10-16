@@ -34,7 +34,7 @@ const STREAMING_PRESET_DESCRIPTIONS = new Function(
 )();
 
 // 3. Verify all expected presets have informative descriptions
-const expectedPresets = ["custom", "ultra_low_latency", "fast_wifi", "balanced", "max_stability"];
+const expectedPresets = ["custom", "ultra_low_latency", "ethernet_100m", "fast_wifi", "balanced", "max_stability"];
 for (const preset of expectedPresets) {
   assert.ok(
     typeof STREAMING_PRESET_DESCRIPTIONS[preset] === "string" && STREAMING_PRESET_DESCRIPTIONS[preset].length > 10,
@@ -114,6 +114,17 @@ assert.strictEqual(ullResult.videoJitterBufferSelect.value, "8", "Ultra-low late
 assert.strictEqual(ullResult.audioJitterBufferSelect.value, "40", "Ultra-low latency must use 40ms audio jitter buffer");
 assert.strictEqual(ullResult.rtpFragmentSizeSelect.value, "1200", "Ultra-low latency must use 1200B fragments for MTU safety");
 assert.strictEqual(ullResult.idrCooldownSelect.value, "750", "Ultra-low latency must use 750ms IDR cooldown");
+
+// Test 2 (Nominal): Ethernet 100M preset configuration (Cable 70-80 Mbps)
+const ethResult = runPresetTest("ethernet_100m");
+assert.strictEqual(ethResult.latencyModeSelect.value, "lowest_latency", "Ethernet 100M must use lowest_latency mode");
+assert.strictEqual(ethResult.packetPacingSelect.value, "balanced", "Ethernet 100M must use balanced pacing to prevent NIC buffer overflow");
+assert.strictEqual(ethResult.encryptionSelect.value, "false", "Ethernet 100M disables loopback encryption on LAN");
+assert.strictEqual(ethResult.frameDropPolicySelect.value, "tolerant", "Ethernet 100M uses tolerant drop policy");
+assert.strictEqual(ethResult.videoJitterBufferSelect.value, "8", "Ethernet 100M uses 8ms video jitter buffer to absorb NACK retransmission");
+assert.strictEqual(ethResult.audioJitterBufferSelect.value, "40", "Ethernet 100M uses 40ms audio jitter buffer");
+assert.strictEqual(ethResult.rtpFragmentSizeSelect.value, "1360", "Ethernet 100M uses 1360B MTU");
+assert.strictEqual(ethResult.idrCooldownSelect.value, "500", "Ethernet 100M uses 500ms IDR cooldown");
 
 // Test 2 (Nominal): Balanced preset configuration
 const balResult = runPresetTest("balanced");
