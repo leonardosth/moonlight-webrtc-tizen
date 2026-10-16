@@ -392,10 +392,10 @@ void MoonlightSession::stop()
     }
 }
 
-void MoonlightSession::onWebRtcKeyframeRequest()
+void MoonlightSession::onWebRtcKeyframeRequest(bool forceIdr)
 {
     if (mediaBridge_) {
-        mediaBridge_->onWebRtcKeyframeRequest();
+        mediaBridge_->onWebRtcKeyframeRequest(forceIdr);
     }
 }
 

@@ -132,6 +132,12 @@ int main()
             [&logs](const std::string& message) { logs.push_back(message); });
 
         auto* videoCallbacks = bridge.videoCallbacks();
+        require((videoCallbacks->capabilities & CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC) != 0,
+                "AVC Reference Frame Invalidation capability must be advertised");
+        require((videoCallbacks->capabilities & CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC) != 0,
+                "HEVC Reference Frame Invalidation capability must be advertised");
+        require((videoCallbacks->capabilities & CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1) != 0,
+                "AV1 Reference Frame Invalidation capability must be advertised");
         require(videoCallbacks->setup(VIDEO_FORMAT_H265, 1280, 720, 60, &bridge, 0) != 0,
                 "HEVC must be rejected");
         require(videoCallbacks->setup(VIDEO_FORMAT_H264, 1280, 720, 60, &bridge, 0) == 0,
@@ -237,6 +243,67 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(550));
         require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
                 "Redundant keyframe request must NOT be forwarded if IDR arrived during cooldown");
+
+        // Test Reference Frame Invalidation (RFI) recovery
+        {
+            std::uint32_t lossStart = 0;
+            std::uint32_t lossEnd = 0;
+            int rfiCallCount = 0;
+            bridge.setFrameLossReporter([&](std::uint32_t start, std::uint32_t end) {
+                lossStart = start;
+                lossEnd = end;
+                rfiCallCount++;
+            });
+
+            // When RFI predicate is enabled:
+            bridge.setRfiEnabledPredicate([] { return true; });
+
+            // Ensure lastFrameNumber is known by submitting a P-frame
+            pframeUnit.frameNumber = 105;
+            require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
+                    "P-frame 105 submission failed");
+
+            // WebRTC requests recovery (forceIdr = false): must trigger RFI, NOT full IDR
+            bridge.onWebRtcKeyframeRequest(false);
+            require(!bridge.hasPendingIdrRequest(),
+                    "RFI should NOT set pending IDR flag");
+            require(bridge.rfiRequestsSent() == 1,
+                    "RFI request counter must be incremented");
+            require(rfiCallCount == 1,
+                    "Frame loss reporter must be called once");
+            require(lossStart == 105 && lossEnd == 106,
+                    "Frame loss reporter must receive tuple [105, 106]");
+
+            // Subsequent P-frame submission should NOT return DR_NEED_IDR because RFI handled recovery
+            pframeUnit.frameNumber = 106;
+            require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_OK,
+                    "Subsequent frame after RFI should return DR_OK, not DR_NEED_IDR");
+
+            // If WebRTC requests forced full IDR (forceIdr = true): must trigger full IDR even if RFI enabled
+            std::this_thread::sleep_for(std::chrono::milliseconds(550)); // clear cooldown
+            bridge.onWebRtcKeyframeRequest(true);
+            require(bridge.hasPendingIdrRequest(),
+                    "Forced IDR must set pending IDR flag even when RFI is enabled");
+            require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_NEED_IDR,
+                    "Forced IDR must return DR_NEED_IDR");
+
+            // If RFI is disabled by host (rfiEnabled == false): falls back to full IDR
+            bridge.setRfiEnabledPredicate([] { return false; });
+            require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                    "Accept IDR to clear state");
+            std::this_thread::sleep_for(std::chrono::milliseconds(550)); // clear cooldown
+            bridge.onWebRtcKeyframeRequest(false);
+            require(bridge.hasPendingIdrRequest(),
+                    "Disabled RFI must fall back to IDR request");
+            require(videoCallbacks->submitDecodeUnit(&pframeUnit) == DR_NEED_IDR,
+                    "Disabled RFI must return DR_NEED_IDR on submit");
+
+            // Reset bridge RFI handlers back to default
+            bridge.setFrameLossReporter(nullptr);
+            bridge.setRfiEnabledPredicate(nullptr);
+            require(videoCallbacks->submitDecodeUnit(&idrUnit) == DR_OK,
+                    "Accept IDR to clear state");
+        }
 
         // Test frame deadline drop policy in LowestLatency mode
         {

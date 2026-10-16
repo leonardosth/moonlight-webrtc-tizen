@@ -60,6 +60,7 @@ struct MoonlightStreamDiagnostics {
     std::uint64_t keyframeRequestsReceived = 0;
     std::uint64_t keyframeRequestsForwarded = 0;
     std::uint64_t keyframeRequestsThrottled = 0;
+    std::uint64_t rfiRequestsSent = 0;
 };
 
 class MoonlightMediaBridge {
@@ -76,11 +77,17 @@ public:
     MoonlightMediaBridge(const MoonlightMediaBridge&) = delete;
     MoonlightMediaBridge& operator=(const MoonlightMediaBridge&) = delete;
 
+    using FrameLossReporter = std::function<void(std::uint32_t startFrame, std::uint32_t endFrame)>;
+    using RfiEnabledPredicate = std::function<bool()>;
+
     DECODER_RENDERER_CALLBACKS* videoCallbacks();
     AUDIO_RENDERER_CALLBACKS* audioCallbacks();
 
-    void onWebRtcKeyframeRequest();
+    void onWebRtcKeyframeRequest(bool forceIdr = false);
+    void setFrameLossReporter(FrameLossReporter reporter);
+    void setRfiEnabledPredicate(RfiEnabledPredicate predicate);
     [[nodiscard]] bool hasPendingIdrRequest() const;
+    [[nodiscard]] std::uint64_t rfiRequestsSent() const noexcept;
     [[nodiscard]] std::uint32_t idrCooldownMs() const noexcept;
     [[nodiscard]] std::uint64_t keyframeRequestsReceived() const noexcept;
     [[nodiscard]] std::uint64_t keyframeRequestsForwarded() const noexcept;
@@ -140,6 +147,10 @@ private:
     std::atomic<std::uint64_t> keyframeRequestsReceived_ = 0;
     std::atomic<std::uint64_t> keyframeRequestsForwarded_ = 0;
     std::atomic<std::uint64_t> keyframeRequestsThrottled_ = 0;
+    std::atomic<std::uint64_t> rfiRequestsSent_ = 0;
+    std::atomic<std::uint32_t> lastFrameNumber_ = 0;
+    FrameLossReporter frameLossReporter_;
+    RfiEnabledPredicate rfiEnabledPredicate_;
     std::chrono::steady_clock::time_point lastIdrForwardedTime_{};
     std::atomic<std::uint64_t> lateFrameDrops_ = 0;
     std::atomic<std::uint64_t> frameDeadlineUs_ = 0;

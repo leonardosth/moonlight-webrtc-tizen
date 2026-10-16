@@ -1807,6 +1807,7 @@ private:
                     sample.keyframeRequestsReceived = diag->keyframeRequestsReceived;
                     sample.keyframeRequestsForwarded = diag->keyframeRequestsForwarded;
                     sample.keyframeRequestsThrottled = diag->keyframeRequestsThrottled;
+                    sample.rfiRequestsSent = diag->rfiRequestsSent;
                     if (session->videoPacer) {
                         const auto pacerStats = session->videoPacer->stats();
                         sample.pacerQueueDepth = pacerStats.maxQueueDepth;

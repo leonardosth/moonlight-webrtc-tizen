@@ -10,7 +10,11 @@
 #include <stdexcept>
 #include <utility>
 
-extern "C" std::uint64_t PltGetMicroseconds(void);
+extern "C" {
+std::uint64_t PltGetMicroseconds(void);
+void connectionDetectedFrameLoss(uint32_t startFrame, uint32_t endFrame);
+bool isReferenceFrameInvalidationEnabled(void);
+}
 
 namespace gateway {
 
@@ -35,6 +39,9 @@ MoonlightMediaBridge::MoonlightMediaBridge(MediaSender& sender,
     videoCallbacks_.stop = &MoonlightMediaBridge::videoStopCallback;
     videoCallbacks_.cleanup = &MoonlightMediaBridge::videoCleanupCallback;
     videoCallbacks_.submitDecodeUnit = &MoonlightMediaBridge::videoSubmitCallback;
+    videoCallbacks_.capabilities = CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC
+                                 | CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC
+                                 | CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1;
 
     LiInitializeAudioCallbacks(&audioCallbacks_);
     audioCallbacks_.init = &MoonlightMediaBridge::audioInitCallback;
@@ -79,10 +86,42 @@ AUDIO_RENDERER_CALLBACKS* MoonlightMediaBridge::audioCallbacks()
     return &audioCallbacks_;
 }
 
-void MoonlightMediaBridge::onWebRtcKeyframeRequest()
+void MoonlightMediaBridge::setFrameLossReporter(FrameLossReporter reporter)
+{
+    frameLossReporter_ = std::move(reporter);
+}
+
+void MoonlightMediaBridge::setRfiEnabledPredicate(RfiEnabledPredicate predicate)
+{
+    rfiEnabledPredicate_ = std::move(predicate);
+}
+
+void MoonlightMediaBridge::onWebRtcKeyframeRequest(bool forceIdr)
 {
     keyframeRequestsReceived_.fetch_add(1, std::memory_order_relaxed);
+
+    const auto lastFrame = lastFrameNumber_.load(std::memory_order_relaxed);
+    const bool rfiEnabled = rfiEnabledPredicate_
+        ? rfiEnabledPredicate_()
+        : isReferenceFrameInvalidationEnabled();
+
+    if (!forceIdr && rfiEnabled && lastFrame > 0) {
+        if (frameLossReporter_) {
+            frameLossReporter_(lastFrame, lastFrame + 1);
+        } else {
+            connectionDetectedFrameLoss(lastFrame, lastFrame + 1);
+        }
+        rfiRequestsSent_.fetch_add(1, std::memory_order_relaxed);
+        log("Reference Frame Invalidation (RFI) requested for frame " + std::to_string(lastFrame));
+        return;
+    }
+
     moonlightIdrRequested_.store(true, std::memory_order_release);
+}
+
+std::uint64_t MoonlightMediaBridge::rfiRequestsSent() const noexcept
+{
+    return rfiRequestsSent_.load(std::memory_order_relaxed);
 }
 
 bool MoonlightMediaBridge::hasPendingIdrRequest() const
@@ -334,6 +373,8 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
         || !videoStarted_.load(std::memory_order_acquire) || !decodeUnit) {
         return DR_NEED_IDR;
     }
+
+    lastFrameNumber_.store(decodeUnit->frameNumber, std::memory_order_relaxed);
 
     const auto nowPltUs = PltGetMicroseconds();
     const auto deadlineUs = frameDeadlineUs_.load(std::memory_order_relaxed);
@@ -604,7 +645,8 @@ int MoonlightMediaBridge::submitVideo(PDECODE_UNIT decodeUnit)
                 lateFrameDrops_.load(std::memory_order_relaxed),
                 keyframeRequestsReceived_.load(std::memory_order_relaxed),
                 keyframeRequestsForwarded_.load(std::memory_order_relaxed),
-                keyframeRequestsThrottled_.load(std::memory_order_relaxed)
+                keyframeRequestsThrottled_.load(std::memory_order_relaxed),
+                rfiRequestsSent_.load(std::memory_order_relaxed)
             };
 
             windowStartTime_ = now;

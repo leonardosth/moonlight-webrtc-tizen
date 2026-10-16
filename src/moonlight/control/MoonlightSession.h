@@ -92,7 +92,7 @@ public:
 
     void start();
     void stop();
-    void onWebRtcKeyframeRequest();
+    void onWebRtcKeyframeRequest(bool forceIdr = false);
     [[nodiscard]] std::optional<MoonlightStreamDiagnostics> streamDiagnostics() const;
     [[nodiscard]] std::uint32_t idrCooldownMs() const noexcept;
 

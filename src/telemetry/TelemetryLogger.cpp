@@ -300,10 +300,13 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         if (hostSample->gatewayLateFrameDrops > 0) {
             ss << ", dropGw: " << hostSample->gatewayLateFrameDrops;
         }
-        if (hostSample->keyframeRequestsReceived > 0) {
+        if (hostSample->keyframeRequestsReceived > 0 || hostSample->rfiRequestsSent > 0) {
             ss << ", idr: " << hostSample->keyframeRequestsReceived << "recv/"
                << hostSample->keyframeRequestsForwarded << "fwd/"
                << hostSample->keyframeRequestsThrottled << "throt";
+            if (hostSample->rfiRequestsSent > 0) {
+                ss << "/" << hostSample->rfiRequestsSent << "rfi";
+            }
         }
         if (hostSample->pacerCatchUpEvents > 0 || hostSample->pacerQueueDepth > 0) {
             ss << ", pacer: q:" << hostSample->pacerQueueDepth
@@ -377,6 +380,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     const auto totalKeyframeRecv = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsReceived : 0;
     const auto totalKeyframeFwd = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsForwarded : 0;
     const auto totalKeyframeThrot = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsThrottled : 0;
+    const auto totalRfiSent = activeSession_->lastHostSample ? activeSession_->lastHostSample->rfiRequestsSent : 0;
 
     double dropRate = 0.0;
     if (totalFramesDecoded + totalFramesDropped > 0) {
@@ -402,7 +406,8 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << totalNackSuppressed << " suppressed, " << totalNackRateLimited << " rate-limited)\n"
        << "  Keyframe Requests (TV): " << totalKeyframeRecv << "\n"
        << "  Keyframes Forwarded:    " << totalKeyframeFwd << "\n"
-       << "  Keyframes Throttled:    " << totalKeyframeThrot << " (Suppressed by rate limiter)\n\n"
+       << "  Keyframes Throttled:    " << totalKeyframeThrot << " (Suppressed by rate limiter)\n"
+       << "  RFI Requests (Loss):    " << totalRfiSent << "\n\n"
        << "Performance Metrics Distribution:\n"
        << formatDistributionLine("TV Decode Time", decodeDist, "ms");
     if (!activeSession_->rvfcProcessingSamples.empty()) {
