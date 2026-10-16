@@ -26,6 +26,7 @@ target_compile_features(opus_file_reader PUBLIC cxx_std_20)
 target_include_directories(opus_file_reader PUBLIC src)
 
 add_library(webrtc_media_sender
+    src/webrtc/NackRateLimiter.cpp
     src/webrtc/PacketPacer.cpp
     src/webrtc/WebRtcMediaSender.cpp
 )
@@ -320,6 +321,16 @@ if(BUILD_TESTING)
     add_test(
         NAME webrtc_media_sender_test
         COMMAND webrtc_media_sender_test
+    )
+
+    add_executable(nack_rate_limiter_test
+        tests/NackRateLimiterTest.cpp
+    )
+    target_link_libraries(nack_rate_limiter_test PRIVATE webrtc_media_sender)
+
+    add_test(
+        NAME nack_rate_limiter_test
+        COMMAND nack_rate_limiter_test
     )
 
     add_executable(gateway_lifecycle_test

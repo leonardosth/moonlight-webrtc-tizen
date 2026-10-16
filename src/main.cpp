@@ -16,6 +16,7 @@
 #include "platform/WakeOnLanAddress.h"
 #include "session/StreamSettings.h"
 #include "telemetry/TelemetryLogger.h"
+#include "webrtc/NackRateLimiter.h"
 #include "webrtc/PacketPacer.h"
 #include "webrtc/SamsungSdp.h"
 #include "webrtc/WebRtcMediaSender.h"
@@ -324,6 +325,7 @@ struct Session {
     std::shared_ptr<rtc::Track> videoTrack;
     std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<gateway::PacingMediaHandler> videoPacer;
+    std::shared_ptr<gateway::NackRateLimitingHandler> nackLimiter;
     std::shared_ptr<rtc::DataChannel> controlChannel;
     std::shared_ptr<rtc::DataChannel> gamepadChannel;
     std::shared_ptr<gateway::WebRtcMediaSender> mediaSender;
@@ -777,7 +779,9 @@ private:
         auto packetizer = gateway::makeVideoRtpPacketizer(
             settings.codec, rtpConfiguration, static_cast<std::size_t>(settings.rtpMaxFragmentSize));
         packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtpConfiguration));
-        packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(VideoRtcpNackBufferSize));
+        auto nackLimiter = std::make_shared<gateway::NackRateLimitingHandler>(VideoRtcpNackBufferSize);
+        packetizer->addToChain(nackLimiter);
+        session->nackLimiter = nackLimiter;
         packetizer->addToChain(std::make_shared<rtc::PliHandler>(
             [this, weakSession, sessionId] {
             if (const auto currentSession = weakSession.lock();
