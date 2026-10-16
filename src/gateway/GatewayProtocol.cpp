@@ -81,6 +81,9 @@ StreamSettings parseSettings(const Json& message)
                 settings.frameDropPolicy = *policy;
             }
         }
+        if (video.contains("ulpfecPercentage") && video.at("ulpfecPercentage").is_number_integer()) {
+            settings.ulpfecPercentage = video.at("ulpfecPercentage").get<int>();
+        }
         settings.audioChannels = audio.at("channels").get<int>();
         if (audio.contains("jitterBufferTargetMs") && audio.at("jitterBufferTargetMs").is_number_integer()) {
             settings.audioJitterBufferTargetMs = audio.at("jitterBufferTargetMs").get<int>();
@@ -112,7 +115,8 @@ Json settingsJson(const StreamSettings& settings)
           {"rtpMaxFragmentSize", settings.rtpMaxFragmentSize},
           {"videoJitterBufferTargetMs", settings.videoJitterBufferTargetMs},
           {"idrCooldownMs", settings.idrCooldownMs},
-          {"frameDropPolicy", std::string(frameDropPolicyName(settings.frameDropPolicy))}}},
+          {"frameDropPolicy", std::string(frameDropPolicyName(settings.frameDropPolicy))},
+          {"ulpfecPercentage", settings.ulpfecPercentage}}},
         {"audio", {{"channels", settings.audioChannels}, {"sampleRate", 48000}, {"jitterBufferTargetMs", settings.audioJitterBufferTargetMs}}},
     };
 }

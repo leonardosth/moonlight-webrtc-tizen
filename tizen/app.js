@@ -65,6 +65,8 @@ const rtpFragmentSizeSelect = document.getElementById("rtp-fragment-size-select"
 const rtpFragmentSizeStatusElement = document.getElementById("rtp-fragment-size-status");
 const idrCooldownSelect = document.getElementById("idr-cooldown-select");
 const idrCooldownStatusElement = document.getElementById("idr-cooldown-status");
+const ulpfecPercentageSelect = document.getElementById("ulpfec-percentage-select");
+const ulpfecPercentageStatusElement = document.getElementById("ulpfec-percentage-status");
 const settingsSelectorMenu = document.getElementById("settings-selector-menu");
 const settingsSelectorHeading = document.getElementById("settings-selector-heading");
 const settingsSelectorOptions = document.getElementById("settings-selector-options");
@@ -931,6 +933,7 @@ function currentPreferenceValues() {
     audioJitterBufferTargetMs: audioJitterBufferSelect ? Number(audioJitterBufferSelect.value) : 40,
     rtpMaxFragmentSize: rtpFragmentSizeSelect ? Number(rtpFragmentSizeSelect.value) : 1360,
     idrCooldownMs: idrCooldownSelect ? Number(idrCooldownSelect.value) : 500,
+    ulpfecPercentage: ulpfecPercentageSelect ? Number(ulpfecPercentageSelect.value) : 0,
   };
 }
 
@@ -1450,6 +1453,7 @@ function handleSessionStatus(message) {
             videoJitterBufferTargetMs: selectedSession.videoJitterBufferTargetMs,
             frameDropPolicy: selectedSession.frameDropPolicy,
             idrCooldownMs: selectedSession.idrCooldownMs,
+            ulpfecPercentage: selectedSession.ulpfecPercentage,
           },
           audio: {
             channels: 2,
@@ -1543,6 +1547,7 @@ function selectedSettings() {
     audioJitterBufferTargetMs: audioJitterBufferSelect ? Number(audioJitterBufferSelect.value) : 40,
     rtpMaxFragmentSize: rtpFragmentSizeSelect ? Number(rtpFragmentSizeSelect.value) : 1360,
     idrCooldownMs: idrCooldownSelect ? Number(idrCooldownSelect.value) : 500,
+    ulpfecPercentage: ulpfecPercentageSelect ? Number(ulpfecPercentageSelect.value) : 0,
   };
 }
 
@@ -1576,6 +1581,7 @@ function startSelectedSession() {
         videoJitterBufferTargetMs: selectedSession.videoJitterBufferTargetMs,
         frameDropPolicy: selectedSession.frameDropPolicy,
         idrCooldownMs: selectedSession.idrCooldownMs,
+        ulpfecPercentage: selectedSession.ulpfecPercentage,
       },
       audio: {
         channels: 2,
@@ -2074,6 +2080,13 @@ const IDR_COOLDOWN_DESCRIPTIONS = {
   750: "750 ms (Conservador / Poupa GPU) — Protege o framerate do jogo em PCs com placas de vídeo de entrada.",
 };
 
+const ULPFEC_PERCENTAGE_DESCRIPTIONS = {
+  0: "Disabled (0% Overhead) — Recuperação de pacotes depende exclusivamente de retransmissões NACK sem consumo extra de banda.",
+  5: "5% (Baixo Overhead / Safe) — Proteção leve contra perdas isoladas gerando 1 pacote de paridade para cada 20 pacotes de vídeo.",
+  10: "10% (Equilibrado) — Recomendado para conexões com perdas ocasionais; gera 1 pacote de paridade a cada 10 pacotes sem round-trip NACK.",
+  20: "20% (Máxima Proteção) — Proteção robusta para redes ruidosas gerando 1 pacote de paridade a cada 5 pacotes com 20% de overhead.",
+};
+
 function updateLatencyModeStatus() {
   if (!latencyModeSelect || !latencyModeStatusElement) {
     return;
@@ -2132,6 +2145,12 @@ function updateIdrCooldownStatus() {
   }
 }
 
+function updateUlpfecPercentageStatus() {
+  if (ulpfecPercentageSelect && ulpfecPercentageStatusElement) {
+    ulpfecPercentageStatusElement.textContent = ULPFEC_PERCENTAGE_DESCRIPTIONS[ulpfecPercentageSelect.value] || ULPFEC_PERCENTAGE_DESCRIPTIONS["0"];
+  }
+}
+
 function applyStreamingPreset(preset) {
   if (!preset || preset === "custom") {
     return;
@@ -2145,6 +2164,7 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
     if (idrCooldownSelect) idrCooldownSelect.value = "750";
+    if (ulpfecPercentageSelect) ulpfecPercentageSelect.value = "0";
   } else if (preset === "low_latency" || preset === "fast_wifi" || preset === "ethernet_100m") {
     if (latencyModeSelect) latencyModeSelect.value = "lowest_latency";
     if (packetPacingSelect) packetPacingSelect.value = "fast";
@@ -2154,6 +2174,7 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
     if (idrCooldownSelect) idrCooldownSelect.value = "500";
+    if (ulpfecPercentageSelect) ulpfecPercentageSelect.value = "0";
   } else if (preset === "balanced") {
     if (latencyModeSelect) latencyModeSelect.value = "balanced";
     if (packetPacingSelect) packetPacingSelect.value = "balanced";
@@ -2163,6 +2184,7 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
     if (idrCooldownSelect) idrCooldownSelect.value = "500";
+    if (ulpfecPercentageSelect) ulpfecPercentageSelect.value = "0";
   } else if (preset === "smooth") {
     if (latencyModeSelect) latencyModeSelect.value = "smooth";
     if (packetPacingSelect) packetPacingSelect.value = "balanced";
@@ -2172,6 +2194,7 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
     if (idrCooldownSelect) idrCooldownSelect.value = "500";
+    if (ulpfecPercentageSelect) ulpfecPercentageSelect.value = "5";
   } else if (preset === "smoothest" || preset === "max_stability") {
     if (latencyModeSelect) latencyModeSelect.value = "smooth";
     if (packetPacingSelect) packetPacingSelect.value = "aggressive";
@@ -2181,6 +2204,7 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "80";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
     if (idrCooldownSelect) idrCooldownSelect.value = "750";
+    if (ulpfecPercentageSelect) ulpfecPercentageSelect.value = "10";
   }
   updateLatencyModeStatus();
   updatePacketPacingStatus();
@@ -2190,6 +2214,7 @@ function applyStreamingPreset(preset) {
   updateAudioJitterBufferStatus();
   updateRtpFragmentSizeStatus();
   updateIdrCooldownStatus();
+  updateUlpfecPercentageStatus();
   applyLowLatencyReceivers();
 }
 
@@ -3656,6 +3681,16 @@ if (idrCooldownSelect) {
     persistCurrentPreferences();
   });
 }
+if (ulpfecPercentageSelect) {
+  ulpfecPercentageSelect.addEventListener("change", function () {
+    if (streamingPresetSelect && streamingPresetSelect.value !== "custom") {
+      streamingPresetSelect.value = "custom";
+      updateStreamingPresetStatus();
+    }
+    updateUlpfecPercentageStatus();
+    persistCurrentPreferences();
+  });
+}
 
 function updateRemoteTracksForVisibility() {
   const enabled = !document.hidden;
@@ -4609,6 +4644,9 @@ if (rtpFragmentSizeSelect && savedPreferences && typeof savedPreferences.rtpMaxF
 if (idrCooldownSelect && savedPreferences && typeof savedPreferences.idrCooldownMs === "number") {
   idrCooldownSelect.value = String(savedPreferences.idrCooldownMs);
 }
+if (ulpfecPercentageSelect && savedPreferences && typeof savedPreferences.ulpfecPercentage === "number") {
+  ulpfecPercentageSelect.value = String(savedPreferences.ulpfecPercentage);
+}
 restoreCachedCapabilities();
 updateInterpolationStatus();
 updateLatencyModeStatus();
@@ -4620,6 +4658,7 @@ updateVideoJitterBufferStatus();
 updateAudioJitterBufferStatus();
 updateRtpFragmentSizeStatus();
 updateIdrCooldownStatus();
+updateUlpfecPercentageStatus();
 renderGateways();
 probeSavedGateways();
 

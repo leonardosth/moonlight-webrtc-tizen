@@ -28,6 +28,7 @@ target_include_directories(opus_file_reader PUBLIC src)
 add_library(webrtc_media_sender
     src/webrtc/NackRateLimiter.cpp
     src/webrtc/PacketPacer.cpp
+    src/webrtc/UlpfecHandler.cpp
     src/webrtc/WebRtcMediaSender.cpp
 )
 
@@ -376,4 +377,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(flat_buffer_pool_test PRIVATE moonlight_media_bridge)
     add_test(NAME flat_buffer_pool_test COMMAND flat_buffer_pool_test)
+
+    add_executable(ulpfec_handler_test
+        tests/UlpfecHandlerTest.cpp
+    )
+    target_link_libraries(ulpfec_handler_test PRIVATE webrtc_media_sender)
+    add_test(NAME ulpfec_handler_test COMMAND ulpfec_handler_test)
 endif()

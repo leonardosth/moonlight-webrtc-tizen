@@ -18,6 +18,7 @@
     audioJitterBufferTargetMs: 40,
     rtpMaxFragmentSize: 1360,
     idrCooldownMs: 500,
+    ulpfecPercentage: 0,
   });
 
   function copyDefaults() {
@@ -37,6 +38,7 @@
       audioJitterBufferTargetMs: DEFAULTS.audioJitterBufferTargetMs,
       rtpMaxFragmentSize: DEFAULTS.rtpMaxFragmentSize,
       idrCooldownMs: DEFAULTS.idrCooldownMs,
+      ulpfecPercentage: DEFAULTS.ulpfecPercentage,
     };
   }
 
@@ -95,6 +97,9 @@
     }
     if (Number.isInteger(candidate.idrCooldownMs) && candidate.idrCooldownMs >= 100) {
       values.idrCooldownMs = candidate.idrCooldownMs;
+    }
+    if (Number.isInteger(candidate.ulpfecPercentage) && candidate.ulpfecPercentage >= 0 && candidate.ulpfecPercentage <= 50) {
+      values.ulpfecPercentage = candidate.ulpfecPercentage;
     }
     return values;
   }

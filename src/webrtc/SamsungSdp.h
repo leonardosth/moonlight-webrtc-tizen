@@ -30,5 +30,6 @@ std::optional<int> hevcLevelId(std::string_view sdp, int payloadType = 96);
 std::optional<int> videoExtensionId(std::string_view sdp, std::string_view uri);
 std::optional<int> videoBandwidthKbps(std::string_view sdp);
 bool hasExpectedVideoBandwidth(std::string_view sdp, int expectedBitrateKbps);
+bool hasRedAndUlpfecCodecs(std::string_view sdp, int redPt = 97, int ulpfecPt = 98);
 
 } // namespace gateway

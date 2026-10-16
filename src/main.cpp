@@ -19,6 +19,7 @@
 #include "webrtc/NackRateLimiter.h"
 #include "webrtc/PacketPacer.h"
 #include "webrtc/SamsungSdp.h"
+#include "webrtc/UlpfecHandler.h"
 #include "webrtc/WebRtcMediaSender.h"
 
 #include <atomic>
@@ -108,6 +109,8 @@ std::filesystem::path resolveLogDirectory(
 }
 
 constexpr std::uint8_t VideoPayloadType = 96;
+constexpr std::uint8_t RedPayloadType = 97;
+constexpr std::uint8_t UlpfecPayloadType = 98;
 constexpr std::uint8_t AudioPayloadType = 111;
 constexpr rtc::SSRC VideoSsrc = 42;
 constexpr rtc::SSRC AudioSsrc = 43;
@@ -326,6 +329,7 @@ struct Session {
     std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<gateway::PacingMediaHandler> videoPacer;
     std::shared_ptr<gateway::NackRateLimitingHandler> nackLimiter;
+    std::shared_ptr<gateway::UlpfecHandler> ulpfecHandler;
     std::shared_ptr<rtc::DataChannel> controlChannel;
     std::shared_ptr<rtc::DataChannel> gamepadChannel;
     std::shared_ptr<gateway::WebRtcMediaSender> mediaSender;
@@ -609,6 +613,15 @@ private:
                         currentSession->requestStreamingStop();
                         return;
                     }
+                    if (settings.ulpfecPercentage > 0
+                        && !gateway::hasRedAndUlpfecCodecs(sdp, RedPayloadType, UlpfecPayloadType)) {
+                        log("WebRTC SDP RED/ULPFEC validation failed");
+                        sendSessionStatus(currentSession,
+                                          "error",
+                                          "WebRTC SDP does not contain RED/ULPFEC codecs");
+                        currentSession->requestStreamingStop();
+                        return;
+                    }
                     if (!hasDataChannelApplicationSection(sdp)) {
                         log("WebRTC data-channel SDP validation failed");
                         sendSessionStatus(currentSession,
@@ -621,6 +634,10 @@ private:
                     if (settings.bitrateKbps > 0) {
                         log("WebRTC video bandwidth cap (b=AS:"
                             + std::to_string(settings.bitrateKbps) + ") enabled");
+                    }
+                    if (settings.ulpfecPercentage > 0) {
+                        log("WebRTC ULPFEC redundancy ("
+                            + std::to_string(settings.ulpfecPercentage) + "%) enabled");
                     }
                     log("Samsung Game Mode SDP imageattr enabled");
                     log("WebRTC data-channel application section enabled");
@@ -751,6 +768,10 @@ private:
         } else {
             video.addH264Codec(VideoPayloadType);
         }
+        if (settings.ulpfecPercentage > 0) {
+            video.addVideoCodec(RedPayloadType, "red");
+            video.addVideoCodec(UlpfecPayloadType, "ulpfec");
+        }
         video.addAttribute(
             gateway::samsungGameModeImageAttribute(settings, VideoPayloadType));
         if (settings.hdr) {
@@ -779,6 +800,12 @@ private:
         auto packetizer = gateway::makeVideoRtpPacketizer(
             settings.codec, rtpConfiguration, static_cast<std::size_t>(settings.rtpMaxFragmentSize));
         packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtpConfiguration));
+        if (settings.ulpfecPercentage > 0) {
+            auto ulpfecHandler = std::make_shared<gateway::UlpfecHandler>(
+                settings.ulpfecPercentage, VideoPayloadType, RedPayloadType, UlpfecPayloadType, rtpConfiguration);
+            packetizer->addToChain(ulpfecHandler);
+            session->ulpfecHandler = ulpfecHandler;
+        }
         auto nackLimiter = std::make_shared<gateway::NackRateLimitingHandler>(VideoRtcpNackBufferSize);
         packetizer->addToChain(nackLimiter);
         session->nackLimiter = nackLimiter;
@@ -1035,6 +1062,7 @@ private:
             params.sdpBandwidthCapKbps = session->settings.bitrateKbps;
             params.nackBufferSize = 8192;
             params.rtpFragmentSize = static_cast<std::size_t>(session->settings.rtpMaxFragmentSize);
+            params.ulpfecPercentage = session->settings.ulpfecPercentage;
             params.clientIp = session->clientAddress;
             telemetryLogger_.logSessionStart(params);
 
@@ -1818,6 +1846,10 @@ private:
                         sample.nackRetransmittedPackets = nackStats.retransmittedPackets;
                         sample.nackSuppressedDuplicates = nackStats.duplicateNacksSuppressed;
                         sample.nackRateLimited = nackStats.rateLimitedNacks;
+                    }
+                    if (session->ulpfecHandler) {
+                        const auto fecStats = session->ulpfecHandler->stats();
+                        sample.fecPacketsGenerated = fecStats.fecPacketsGenerated;
                     }
                     hostSample = sample;
                 }

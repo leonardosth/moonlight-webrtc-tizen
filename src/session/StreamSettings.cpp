@@ -94,6 +94,9 @@ std::optional<std::string> validateStreamSettings(const StreamSettings& settings
     if (settings.rtpMaxFragmentSize < 1000 || settings.rtpMaxFragmentSize > 1460) {
         return "Unsupported RTP fragment size";
     }
+    if (settings.ulpfecPercentage < 0 || settings.ulpfecPercentage > 50) {
+        return "Unsupported ULPFEC redundancy percentage (must be between 0 and 50)";
+    }
     return std::nullopt;
 }
 

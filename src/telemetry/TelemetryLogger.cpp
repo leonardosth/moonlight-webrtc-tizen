@@ -226,6 +226,7 @@ void TelemetryLogger::logSessionStart(const SessionParameters& params)
        << "  - NACK History Buffer:  " << params.nackBufferSize << " packets\n"
        << "  - RTP Fragment Size:    " << params.rtpFragmentSize << " bytes\n"
        << "  - SDP Bandwidth Cap:    " << (params.sdpBandwidthCapKbps > 0 ? ("Enabled (b=AS:" + std::to_string(params.sdpBandwidthCapKbps) + ")") : "Disabled") << "\n"
+       << "  - ULPFEC Redundancy:    " << (params.ulpfecPercentage > 0 ? (std::to_string(params.ulpfecPercentage) + "% (RFC 5109)") : "Disabled") << "\n"
        << "================================================================================\n";
 
     writeLocked(ss.str());
@@ -317,6 +318,9 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
                << hostSample->nackSuppressedDuplicates << "suppr/"
                << hostSample->nackRateLimited << "lim";
         }
+        if (hostSample->fecPacketsGenerated > 0) {
+            ss << ", fec: " << hostSample->fecPacketsGenerated;
+        }
         ss << ") | ";
     }
 
@@ -381,6 +385,7 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     const auto totalKeyframeFwd = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsForwarded : 0;
     const auto totalKeyframeThrot = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsThrottled : 0;
     const auto totalRfiSent = activeSession_->lastHostSample ? activeSession_->lastHostSample->rfiRequestsSent : 0;
+    const auto totalFecGen = activeSession_->lastHostSample ? activeSession_->lastHostSample->fecPacketsGenerated : 0;
 
     double dropRate = 0.0;
     if (totalFramesDecoded + totalFramesDropped > 0) {
@@ -407,7 +412,8 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << "  Keyframe Requests (TV): " << totalKeyframeRecv << "\n"
        << "  Keyframes Forwarded:    " << totalKeyframeFwd << "\n"
        << "  Keyframes Throttled:    " << totalKeyframeThrot << " (Suppressed by rate limiter)\n"
-       << "  RFI Requests (Loss):    " << totalRfiSent << "\n\n"
+       << "  RFI Requests (Loss):    " << totalRfiSent << "\n"
+       << "  ULPFEC Packets Gen:     " << totalFecGen << "\n\n"
        << "Performance Metrics Distribution:\n"
        << formatDistributionLine("TV Decode Time", decodeDist, "ms");
     if (!activeSession_->rvfcProcessingSamples.empty()) {

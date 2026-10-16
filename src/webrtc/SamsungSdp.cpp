@@ -304,4 +304,16 @@ bool hasExpectedVideoBandwidth(std::string_view sdp, int expectedBitrateKbps)
     return actual.has_value() && *actual == expectedBitrateKbps;
 }
 
+bool hasRedAndUlpfecCodecs(std::string_view sdp, int redPt, int ulpfecPt)
+{
+    const auto section = videoSection(sdp);
+    if (section.empty()) {
+        return false;
+    }
+    const std::string redStr = "a=rtpmap:" + std::to_string(redPt) + " red/90000";
+    const std::string ulpfecStr = "a=rtpmap:" + std::to_string(ulpfecPt) + " ulpfec/90000";
+    return section.find(redStr) != std::string_view::npos
+        && section.find(ulpfecStr) != std::string_view::npos;
+}
+
 } // namespace gateway

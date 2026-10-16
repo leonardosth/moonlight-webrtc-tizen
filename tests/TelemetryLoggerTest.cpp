@@ -56,6 +56,7 @@ int main()
             params.frameDeadlineUs = 25000;
             params.idrCooldownMs = 350;
             params.sdpBandwidthCapKbps = 50000;
+            params.ulpfecPercentage = 10;
             params.clientIp = "192.168.1.100:50000";
 
             logger.logSessionStart(params);
@@ -96,6 +97,7 @@ int main()
                 host.nackRetransmittedPackets = 12;
                 host.nackSuppressedDuplicates = 3;
                 host.nackRateLimited = 1;
+                host.fecPacketsGenerated = 8;
 
                 logger.recordTelemetry(42, client, host);
             }
@@ -125,6 +127,8 @@ int main()
                 "Log must contain RTP Fragment Size");
         require(logContent.find("SDP Bandwidth Cap:    Enabled (b=AS:50000)") != std::string::npos,
                 "Log must contain SDP Bandwidth Cap");
+        require(logContent.find("ULPFEC Redundancy:    10% (RFC 5109)") != std::string::npos,
+                "Log must contain ULPFEC Redundancy in start");
         require(logContent.find("[SESSION END]") != std::string::npos, "Log must contain [SESSION END]");
         require(logContent.find("TV Decode Time") != std::string::npos, "Log must contain TV Decode Time distribution");
         require(logContent.find("TV RVFC Processing") != std::string::npos, "Log must contain TV RVFC Processing distribution");
@@ -134,8 +138,10 @@ int main()
         require(logContent.find("Keyframes Forwarded:    2") != std::string::npos, "Log must contain Keyframes Forwarded");
         require(logContent.find("Keyframes Throttled:    3") != std::string::npos, "Log must contain Keyframes Throttled");
         require(logContent.find("RFI Requests (Loss):    4") != std::string::npos, "Log must contain RFI Requests in session end");
+        require(logContent.find("ULPFEC Packets Gen:     8") != std::string::npos, "Log must contain ULPFEC Packets Gen in session end");
         require(logContent.find("dropGw: 2") != std::string::npos, "Log must contain dropGw in periodic line");
         require(logContent.find("idr: 5recv/2fwd/3throt/4rfi") != std::string::npos, "Log must contain idr and rfi in periodic line");
+        require(logContent.find("fec: 8") != std::string::npos, "Log must contain fec in periodic line");
         require(logContent.find("lostPkts: 5 [+5]") != std::string::npos, "Log must contain packet loss delta in periodic line");
         require(logContent.find("pacer: q:4/catchUp:1") != std::string::npos, "Log must contain pacer stats in periodic line");
         require(logContent.find("nack: 12tx/3suppr/1lim") != std::string::npos, "Log must contain NACK limiter stats in periodic line");

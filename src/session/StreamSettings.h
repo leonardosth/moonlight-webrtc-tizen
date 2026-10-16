@@ -154,6 +154,7 @@ struct StreamSettings {
     int audioJitterBufferTargetMs = 40;
     int idrCooldownMs = 500;
     FrameDropPolicy frameDropPolicy = FrameDropPolicy::Auto;
+    int ulpfecPercentage = 0;
 
     bool operator==(const StreamSettings&) const = default;
 };

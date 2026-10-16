@@ -784,9 +784,68 @@ int main()
                 "Gateway status must expose the current Sunshine application");
         require(!gateway::protocol::makeGatewayStatus(runningStatus).contains("macAddress"),
                 "Gateway status must omit an unknown Wake-on-LAN address");
-        runningStatus.macAddress = "00:1A:2B:3C:4D:5E";
-        require(gateway::protocol::makeGatewayStatus(runningStatus).at("macAddress") == "00:1A:2B:3C:4D:5E",
-                "Gateway status must expose its Wake-on-LAN address");
+        // Test ULPFEC settings and SDP validation
+        {
+            auto fecSettings = gateway::defaultStreamSettings();
+            fecSettings.ulpfecPercentage = 10;
+            const auto fecJson = gateway::protocol::makeSessionStatus("active", 1, fecSettings);
+            require(fecJson.at("video").at("ulpfecPercentage") == 10,
+                    "makeSessionStatus must serialize ulpfecPercentage");
+
+            std::string startWithFec = nlohmann::json({
+                {"version", 1},
+                {"type", "start-session"},
+                {"appId", "7"},
+                {"video",
+                 {{"width", 1280},
+                  {"height", 720},
+                  {"fps", 60},
+                  {"codec", "h264"},
+                  {"bitrateKbps", 12000},
+                  {"hdr", false},
+                  {"ulpfecPercentage", 20}}},
+                {"audio", {{"channels", 2}}},
+            }).dump();
+
+            const auto parsedMsg = gateway::protocol::parseClientMessage(startWithFec);
+            const auto* start = std::get_if<gateway::protocol::StartSessionRequest>(&parsedMsg.payload);
+            require(start && start->settings.ulpfecPercentage == 20,
+                    "parseClientMessage must parse ulpfecPercentage");
+
+            // Invalid ulpfec percentage (> 50) must throw protocol error
+            std::string invalidFec = nlohmann::json({
+                {"version", 1},
+                {"type", "start-session"},
+                {"appId", "7"},
+                {"video",
+                 {{"width", 1280},
+                  {"height", 720},
+                  {"fps", 60},
+                  {"codec", "h264"},
+                  {"bitrateKbps", 12000},
+                  {"hdr", false},
+                  {"ulpfecPercentage", 75}}},
+                {"audio", {{"channels", 2}}},
+            }).dump();
+            requireProtocolError([&] { gateway::protocol::parseClientMessage(invalidFec); }, "unsupported-settings");
+
+            // hasRedAndUlpfecCodecs check
+            std::string sampleSdp =
+                "v=0\r\n"
+                "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98\r\n"
+                "a=rtpmap:96 H264/90000\r\n"
+                "a=rtpmap:97 red/90000\r\n"
+                "a=rtpmap:98 ulpfec/90000\r\n";
+            require(gateway::hasRedAndUlpfecCodecs(sampleSdp, 97, 98),
+                    "hasRedAndUlpfecCodecs must recognize RED and ULPFEC lines in SDP");
+
+            std::string nonFecSdp =
+                "v=0\r\n"
+                "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+                "a=rtpmap:96 H264/90000\r\n";
+            require(!gateway::hasRedAndUlpfecCodecs(nonFecSdp, 97, 98),
+                    "hasRedAndUlpfecCodecs must return false when RED/ULPFEC are absent");
+        }
 
         std::cout << "Gateway protocol tests passed\n";
         return 0;

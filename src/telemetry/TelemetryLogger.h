@@ -43,6 +43,7 @@ struct SessionParameters {
     int videoJitterBufferTargetMs = 15;
     int audioJitterBufferTargetMs = 40;
     std::string frameDropPolicyName = "auto";
+    int ulpfecPercentage = 0;
     std::string clientIp;
 };
 
@@ -89,6 +90,7 @@ struct HostTelemetrySample {
     std::uint64_t nackRetransmittedPackets = 0;
     std::uint64_t nackSuppressedDuplicates = 0;
     std::uint64_t nackRateLimited = 0;
+    std::uint64_t fecPacketsGenerated = 0;
 };
 
 struct MetricDistribution {

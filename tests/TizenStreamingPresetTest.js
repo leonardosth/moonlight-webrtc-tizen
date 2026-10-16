@@ -22,6 +22,10 @@ assert.ok(
   "app.js must define STREAMING_PRESET_DESCRIPTIONS"
 );
 assert.ok(
+  appContent.includes("const ULPFEC_PERCENTAGE_DESCRIPTIONS = {"),
+  "app.js must define ULPFEC_PERCENTAGE_DESCRIPTIONS"
+);
+assert.ok(
   appContent.includes("function applyStreamingPreset(preset)"),
   "app.js must define applyStreamingPreset"
 );
@@ -76,6 +80,7 @@ function runPresetTest(presetToApply, partialDom) {
     audioJitterBufferSelect: partialDom && partialDom.audioJitterBufferSelect === null ? null : createMockSelect("40"),
     rtpFragmentSizeSelect: partialDom && partialDom.rtpFragmentSizeSelect === null ? null : createMockSelect("1360"),
     idrCooldownSelect: partialDom && partialDom.idrCooldownSelect === null ? null : createMockSelect("500"),
+    ulpfecPercentageSelect: partialDom && partialDom.ulpfecPercentageSelect === null ? null : createMockSelect("0"),
     streamingPresetStatusElement: createMockElement(),
     latencyModeStatusElement: createMockElement(),
     packetPacingStatusElement: createMockElement(),
@@ -85,6 +90,7 @@ function runPresetTest(presetToApply, partialDom) {
     audioJitterBufferStatusElement: createMockElement(),
     rtpFragmentSizeStatusElement: createMockElement(),
     idrCooldownStatusElement: createMockElement(),
+    ulpfecPercentageStatusElement: createMockElement(),
     updateLatencyModeStatus: function () {},
     updatePacketPacingStatus: function () {},
     updateEncryptionStatus: function () {},
@@ -93,6 +99,7 @@ function runPresetTest(presetToApply, partialDom) {
     updateAudioJitterBufferStatus: function () {},
     updateRtpFragmentSizeStatus: function () {},
     updateIdrCooldownStatus: function () {},
+    updateUlpfecPercentageStatus: function () {},
     applyLowLatencyReceivers: function () {},
   };
 
@@ -114,6 +121,7 @@ assert.strictEqual(ullResult.videoJitterBufferSelect.value, "8", "Ultra-low late
 assert.strictEqual(ullResult.audioJitterBufferSelect.value, "40", "Ultra-low latency must use 40ms audio jitter buffer");
 assert.strictEqual(ullResult.rtpFragmentSizeSelect.value, "1200", "Ultra-low latency must use 1200B fragments for MTU safety");
 assert.strictEqual(ullResult.idrCooldownSelect.value, "750", "Ultra-low latency must use 750ms IDR cooldown");
+assert.strictEqual(ullResult.ulpfecPercentageSelect.value, "0", "Ultra-low latency must disable ULPFEC");
 
 // Test 2 (Nominal): Low Latency preset configuration
 const lowResult = runPresetTest("low_latency");
@@ -125,6 +133,7 @@ assert.strictEqual(lowResult.videoJitterBufferSelect.value, "8", "Low Latency us
 assert.strictEqual(lowResult.audioJitterBufferSelect.value, "40", "Low Latency uses 40ms audio jitter buffer");
 assert.strictEqual(lowResult.rtpFragmentSizeSelect.value, "1360", "Low Latency uses 1360B MTU");
 assert.strictEqual(lowResult.idrCooldownSelect.value, "500", "Low Latency uses 500ms IDR cooldown");
+assert.strictEqual(lowResult.ulpfecPercentageSelect.value, "0", "Low Latency must disable ULPFEC");
 
 // Test 3 (Nominal): Balanced preset configuration
 const balResult = runPresetTest("balanced");
@@ -136,6 +145,7 @@ assert.strictEqual(balResult.videoJitterBufferSelect.value, "15");
 assert.strictEqual(balResult.audioJitterBufferSelect.value, "40");
 assert.strictEqual(balResult.rtpFragmentSizeSelect.value, "1360");
 assert.strictEqual(balResult.idrCooldownSelect.value, "500");
+assert.strictEqual(balResult.ulpfecPercentageSelect.value, "0", "Balanced preset must keep ULPFEC 0% by default");
 
 // Test 4 (Nominal): Smooth preset configuration
 const smoothResult = runPresetTest("smooth");
@@ -147,6 +157,7 @@ assert.strictEqual(smoothResult.videoJitterBufferSelect.value, "30");
 assert.strictEqual(smoothResult.audioJitterBufferSelect.value, "40");
 assert.strictEqual(smoothResult.rtpFragmentSizeSelect.value, "1360");
 assert.strictEqual(smoothResult.idrCooldownSelect.value, "500");
+assert.strictEqual(smoothResult.ulpfecPercentageSelect.value, "5", "Smooth preset must use 5% ULPFEC protection");
 
 // Test 5 (Nominal): Smoothest preset configuration
 const smoothestResult = runPresetTest("smoothest");
@@ -158,6 +169,7 @@ assert.strictEqual(smoothestResult.videoJitterBufferSelect.value, "30");
 assert.strictEqual(smoothestResult.audioJitterBufferSelect.value, "80");
 assert.strictEqual(smoothestResult.rtpFragmentSizeSelect.value, "1200");
 assert.strictEqual(smoothestResult.idrCooldownSelect.value, "750");
+assert.strictEqual(smoothestResult.ulpfecPercentageSelect.value, "10", "Smoothest preset must use 10% ULPFEC protection");
 
 // Test 5 (Edge Case): 'custom' preset does not overwrite existing options
 const customResult = runPresetTest("custom");
