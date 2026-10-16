@@ -237,9 +237,15 @@ assert.deepStrictEqual(global.ClientPreferences.create(persistentStorage).load()
 }, "saved preferences must survive a simulated application reload");
 assert.strictEqual(preferences.snapshot().fps, 120,
   "FPS must be a persisted selectable preference");
-preferences.update("streamingPreset", "ethernet_100m");
-assert.strictEqual(preferences.snapshot().streamingPreset, "ethernet_100m",
-  "ethernet_100m must be a valid persisted streaming preset");
+preferences.update("streamingPreset", "low_latency");
+assert.strictEqual(preferences.snapshot().streamingPreset, "low_latency",
+  "low_latency must be a valid persisted streaming preset");
+preferences.update("streamingPreset", "smooth");
+assert.strictEqual(preferences.snapshot().streamingPreset, "smooth",
+  "smooth must be a valid persisted streaming preset");
+preferences.update("streamingPreset", "smoothest");
+assert.strictEqual(preferences.snapshot().streamingPreset, "smoothest",
+  "smoothest must be a valid persisted streaming preset");
 persistentStorage.setItem(global.ClientPreferences.STORAGE_KEY, JSON.stringify({
   resolution: 4, fps: "sixty", codec: false, hdr: "true", bitrateKbps: -1, latencyMode: 123, packetPacing: 456, frameInterpolation: "yes",
   streamingPreset: 999, sunshineEncryption: "nope", frameDropPolicy: 123, videoJitterBufferTargetMs: -5, audioJitterBufferTargetMs: "ten", rtpMaxFragmentSize: 9999, idrCooldownMs: 10,

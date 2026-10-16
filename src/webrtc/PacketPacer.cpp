@@ -47,11 +47,9 @@ PacingMediaHandler::PacingMediaHandler(PacketPacing pacing,
         const double catchUpMultiplier = std::max(multiplier * 1.15, 1.25);
         catchUpBytesPerSec_ = static_cast<std::uint64_t>((static_cast<double>(bitrateKbps_) * 1000.0 * catchUpMultiplier) / 8.0);
 
-        // Line-rate safety cap: On 100 Mbps Ethernet (common on Samsung TVs),
-        // instantaneous rate exceeding ~95 Mbps will overflow switch/TV PHY buffers.
-        // If maxBandwidthKbps is provided (>0), cap rate to that; otherwise if bitrate <= 85 Mbps,
-        // cap to 95 Mbps to guarantee no Fast Ethernet port overflow.
-        const int effectiveCapKbps = (maxBandwidthKbps > 0) ? maxBandwidthKbps : (bitrateKbps_ <= 85000 ? 95000 : 0);
+        // Line-rate safety cap: If maxBandwidthKbps is explicitly provided (>0), cap rate to that.
+        // No implicit cap is applied by default so Wi-Fi 5GHz and Gigabit links are unthrottled.
+        const int effectiveCapKbps = (maxBandwidthKbps > 0) ? maxBandwidthKbps : 0;
         if (effectiveCapKbps > 0) {
             maxLineRateBytesPerSec_ = static_cast<std::uint64_t>((static_cast<double>(effectiveCapKbps) * 1000.0) / 8.0);
             if (bytesPerSec_ > maxLineRateBytesPerSec_) {

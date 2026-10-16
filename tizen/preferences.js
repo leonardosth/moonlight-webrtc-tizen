@@ -69,8 +69,14 @@
     if (typeof candidate.frameInterpolation === "boolean") {
       values.frameInterpolation = candidate.frameInterpolation;
     }
-    if (typeof candidate.streamingPreset === "string" && (candidate.streamingPreset === "custom" || candidate.streamingPreset === "ultra_low_latency" || candidate.streamingPreset === "ethernet_100m" || candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "balanced" || candidate.streamingPreset === "max_stability")) {
-      values.streamingPreset = candidate.streamingPreset;
+    if (typeof candidate.streamingPreset === "string" && (candidate.streamingPreset === "custom" || candidate.streamingPreset === "ultra_low_latency" || candidate.streamingPreset === "low_latency" || candidate.streamingPreset === "balanced" || candidate.streamingPreset === "smooth" || candidate.streamingPreset === "smoothest" || candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "max_stability" || candidate.streamingPreset === "ethernet_100m")) {
+      if (candidate.streamingPreset === "fast_wifi" || candidate.streamingPreset === "ethernet_100m") {
+        values.streamingPreset = "low_latency";
+      } else if (candidate.streamingPreset === "max_stability") {
+        values.streamingPreset = "smoothest";
+      } else {
+        values.streamingPreset = candidate.streamingPreset;
+      }
     }
     if (typeof candidate.sunshineEncryption === "boolean") {
       values.sunshineEncryption = candidate.sunshineEncryption;

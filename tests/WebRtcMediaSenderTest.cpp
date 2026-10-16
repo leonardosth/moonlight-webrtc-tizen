@@ -246,6 +246,12 @@ int main()
             require(cappedPacer.catchUpBytesPerSec() <= MaxExpected95MbpsBps,
                     "Pacer catchUpBytesPerSec must be clamped to Ethernet line rate safety cap (95 Mbps)");
             cappedPacer.stop();
+
+            // When maxBandwidthKbps is not provided (0), pacer is unthrottled for Wi-Fi 5GHz / Gigabit
+            gateway::PacingMediaHandler uncappedPacer(gateway::PacketPacing::Fast, 60, 80000, nullptr, 0);
+            require(uncappedPacer.bytesPerSec() > MaxExpected95MbpsBps,
+                    "Pacer must not be capped when maxBandwidthKbps is 0");
+            uncappedPacer.stop();
         }
 
         std::cout << "WebRTC media sender tests passed\n";

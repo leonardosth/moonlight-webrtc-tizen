@@ -2030,11 +2030,11 @@ const PACKET_PACING_DESCRIPTIONS = {
 
 const STREAMING_PRESET_DESCRIPTIONS = {
   custom: "Custom — Ajustes manuais de entrega, criptografia, buffers e políticas de descarte.",
-  ultra_low_latency: "Ultra-Low Latency (Cabo LAN Direto) — Entrega imediata sem pacer, buffer de 8ms para absorver retransmissões NACK sem engasgos, sem criptografia loopback e sem drops.",
-  ethernet_100m: "Ethernet 100M (Cabo LAN 70-80 Mbps) — Pacing suave (Balanced) contra overflow na placa 100M da TV, sem criptografia em LAN, MTU 1360B e buffer 8ms contra perdas.",
-  fast_wifi: "Fast Wi-Fi — Pacing rápido, sem criptografia em LAN, buffer de 8ms e descarte tolerante para Wi-Fi 5/6 GHz.",
-  balanced: "Balanced — Configuração padrão recomendada: criptografia ativa, pacer suave e buffer de 15ms.",
-  max_stability: "Max Stability — Pacing espalhado, buffer resiliente de 30ms/80ms e pacotes de 1200B contra perda severa.",
+  ultra_low_latency: "Ultra-Low Latency — Mínima latência absoluta: sem pacer, buffer de 8ms para absorver NACK, sem criptografia loopback e sem drops.",
+  low_latency: "Low Latency — Resposta rápida com absorção de jitter: pacer rápido (4x / ~4ms), sem criptografia em LAN, buffer de 8ms e MTU 1360B.",
+  balanced: "Balanced — Configuração padrão recomendada: criptografia ativa, pacer suave (1.15x) e buffer de 15ms.",
+  smooth: "Smooth — Foco em fluidez constante de vídeo: pacer equilibrado, buffer de 30ms e descarte tolerante contra micro-stutter.",
+  smoothest: "Smoothest — Máxima estabilidade contra oscilações de rede: pacer espalhado (1.05x), buffers resilientes de 30ms/80ms e pacotes de 1200B.",
 };
 
 const ENCRYPTION_DESCRIPTIONS = {
@@ -2145,16 +2145,8 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1200";
     if (idrCooldownSelect) idrCooldownSelect.value = "750";
-  } else if (preset === "ethernet_100m") {
+  } else if (preset === "low_latency" || preset === "fast_wifi" || preset === "ethernet_100m") {
     if (latencyModeSelect) latencyModeSelect.value = "lowest_latency";
-    if (packetPacingSelect) packetPacingSelect.value = "balanced";
-    if (encryptionSelect) encryptionSelect.value = "false";
-    if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";
-    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "8";
-    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
-    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
-    if (idrCooldownSelect) idrCooldownSelect.value = "500";
-  } else if (preset === "fast_wifi") {
     if (packetPacingSelect) packetPacingSelect.value = "fast";
     if (encryptionSelect) encryptionSelect.value = "false";
     if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";
@@ -2163,6 +2155,7 @@ function applyStreamingPreset(preset) {
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
     if (idrCooldownSelect) idrCooldownSelect.value = "500";
   } else if (preset === "balanced") {
+    if (latencyModeSelect) latencyModeSelect.value = "balanced";
     if (packetPacingSelect) packetPacingSelect.value = "balanced";
     if (encryptionSelect) encryptionSelect.value = "true";
     if (frameDropPolicySelect) frameDropPolicySelect.value = "auto";
@@ -2170,7 +2163,17 @@ function applyStreamingPreset(preset) {
     if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
     if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
     if (idrCooldownSelect) idrCooldownSelect.value = "500";
-  } else if (preset === "max_stability") {
+  } else if (preset === "smooth") {
+    if (latencyModeSelect) latencyModeSelect.value = "smooth";
+    if (packetPacingSelect) packetPacingSelect.value = "balanced";
+    if (encryptionSelect) encryptionSelect.value = "true";
+    if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";
+    if (videoJitterBufferSelect) videoJitterBufferSelect.value = "30";
+    if (audioJitterBufferSelect) audioJitterBufferSelect.value = "40";
+    if (rtpFragmentSizeSelect) rtpFragmentSizeSelect.value = "1360";
+    if (idrCooldownSelect) idrCooldownSelect.value = "500";
+  } else if (preset === "smoothest" || preset === "max_stability") {
+    if (latencyModeSelect) latencyModeSelect.value = "smooth";
     if (packetPacingSelect) packetPacingSelect.value = "aggressive";
     if (encryptionSelect) encryptionSelect.value = "true";
     if (frameDropPolicySelect) frameDropPolicySelect.value = "tolerant";

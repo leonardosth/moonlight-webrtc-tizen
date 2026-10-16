@@ -34,7 +34,7 @@ const STREAMING_PRESET_DESCRIPTIONS = new Function(
 )();
 
 // 3. Verify all expected presets have informative descriptions
-const expectedPresets = ["custom", "ultra_low_latency", "ethernet_100m", "fast_wifi", "balanced", "max_stability"];
+const expectedPresets = ["custom", "ultra_low_latency", "low_latency", "balanced", "smooth", "smoothest"];
 for (const preset of expectedPresets) {
   assert.ok(
     typeof STREAMING_PRESET_DESCRIPTIONS[preset] === "string" && STREAMING_PRESET_DESCRIPTIONS[preset].length > 10,
@@ -115,18 +115,18 @@ assert.strictEqual(ullResult.audioJitterBufferSelect.value, "40", "Ultra-low lat
 assert.strictEqual(ullResult.rtpFragmentSizeSelect.value, "1200", "Ultra-low latency must use 1200B fragments for MTU safety");
 assert.strictEqual(ullResult.idrCooldownSelect.value, "750", "Ultra-low latency must use 750ms IDR cooldown");
 
-// Test 2 (Nominal): Ethernet 100M preset configuration (Cable 70-80 Mbps)
-const ethResult = runPresetTest("ethernet_100m");
-assert.strictEqual(ethResult.latencyModeSelect.value, "lowest_latency", "Ethernet 100M must use lowest_latency mode");
-assert.strictEqual(ethResult.packetPacingSelect.value, "balanced", "Ethernet 100M must use balanced pacing to prevent NIC buffer overflow");
-assert.strictEqual(ethResult.encryptionSelect.value, "false", "Ethernet 100M disables loopback encryption on LAN");
-assert.strictEqual(ethResult.frameDropPolicySelect.value, "tolerant", "Ethernet 100M uses tolerant drop policy");
-assert.strictEqual(ethResult.videoJitterBufferSelect.value, "8", "Ethernet 100M uses 8ms video jitter buffer to absorb NACK retransmission");
-assert.strictEqual(ethResult.audioJitterBufferSelect.value, "40", "Ethernet 100M uses 40ms audio jitter buffer");
-assert.strictEqual(ethResult.rtpFragmentSizeSelect.value, "1360", "Ethernet 100M uses 1360B MTU");
-assert.strictEqual(ethResult.idrCooldownSelect.value, "500", "Ethernet 100M uses 500ms IDR cooldown");
+// Test 2 (Nominal): Low Latency preset configuration
+const lowResult = runPresetTest("low_latency");
+assert.strictEqual(lowResult.latencyModeSelect.value, "lowest_latency", "Low Latency must use lowest_latency mode");
+assert.strictEqual(lowResult.packetPacingSelect.value, "fast", "Low Latency must use fast pacing (4x delivery window)");
+assert.strictEqual(lowResult.encryptionSelect.value, "false", "Low Latency disables loopback encryption on LAN");
+assert.strictEqual(lowResult.frameDropPolicySelect.value, "tolerant", "Low Latency uses tolerant drop policy");
+assert.strictEqual(lowResult.videoJitterBufferSelect.value, "8", "Low Latency uses 8ms video jitter buffer to absorb NACK retransmission");
+assert.strictEqual(lowResult.audioJitterBufferSelect.value, "40", "Low Latency uses 40ms audio jitter buffer");
+assert.strictEqual(lowResult.rtpFragmentSizeSelect.value, "1360", "Low Latency uses 1360B MTU");
+assert.strictEqual(lowResult.idrCooldownSelect.value, "500", "Low Latency uses 500ms IDR cooldown");
 
-// Test 2 (Nominal): Balanced preset configuration
+// Test 3 (Nominal): Balanced preset configuration
 const balResult = runPresetTest("balanced");
 assert.strictEqual(balResult.latencyModeSelect.value, "balanced");
 assert.strictEqual(balResult.packetPacingSelect.value, "balanced");
@@ -137,25 +137,27 @@ assert.strictEqual(balResult.audioJitterBufferSelect.value, "40");
 assert.strictEqual(balResult.rtpFragmentSizeSelect.value, "1360");
 assert.strictEqual(balResult.idrCooldownSelect.value, "500");
 
-// Test 3 (Nominal): Fast Wi-Fi preset configuration
-const wifiResult = runPresetTest("fast_wifi");
-assert.strictEqual(wifiResult.packetPacingSelect.value, "fast");
-assert.strictEqual(wifiResult.encryptionSelect.value, "false");
-assert.strictEqual(wifiResult.frameDropPolicySelect.value, "tolerant");
-assert.strictEqual(wifiResult.videoJitterBufferSelect.value, "8");
-assert.strictEqual(wifiResult.audioJitterBufferSelect.value, "40");
-assert.strictEqual(wifiResult.rtpFragmentSizeSelect.value, "1360");
-assert.strictEqual(wifiResult.idrCooldownSelect.value, "500");
+// Test 4 (Nominal): Smooth preset configuration
+const smoothResult = runPresetTest("smooth");
+assert.strictEqual(smoothResult.latencyModeSelect.value, "smooth");
+assert.strictEqual(smoothResult.packetPacingSelect.value, "balanced");
+assert.strictEqual(smoothResult.encryptionSelect.value, "true");
+assert.strictEqual(smoothResult.frameDropPolicySelect.value, "tolerant");
+assert.strictEqual(smoothResult.videoJitterBufferSelect.value, "30");
+assert.strictEqual(smoothResult.audioJitterBufferSelect.value, "40");
+assert.strictEqual(smoothResult.rtpFragmentSizeSelect.value, "1360");
+assert.strictEqual(smoothResult.idrCooldownSelect.value, "500");
 
-// Test 4 (Nominal): Max Stability preset configuration
-const stabResult = runPresetTest("max_stability");
-assert.strictEqual(stabResult.packetPacingSelect.value, "aggressive");
-assert.strictEqual(stabResult.encryptionSelect.value, "true");
-assert.strictEqual(stabResult.frameDropPolicySelect.value, "tolerant");
-assert.strictEqual(stabResult.videoJitterBufferSelect.value, "30");
-assert.strictEqual(stabResult.audioJitterBufferSelect.value, "80");
-assert.strictEqual(stabResult.rtpFragmentSizeSelect.value, "1200");
-assert.strictEqual(stabResult.idrCooldownSelect.value, "750");
+// Test 5 (Nominal): Smoothest preset configuration
+const smoothestResult = runPresetTest("smoothest");
+assert.strictEqual(smoothestResult.latencyModeSelect.value, "smooth");
+assert.strictEqual(smoothestResult.packetPacingSelect.value, "aggressive");
+assert.strictEqual(smoothestResult.encryptionSelect.value, "true");
+assert.strictEqual(smoothestResult.frameDropPolicySelect.value, "tolerant");
+assert.strictEqual(smoothestResult.videoJitterBufferSelect.value, "30");
+assert.strictEqual(smoothestResult.audioJitterBufferSelect.value, "80");
+assert.strictEqual(smoothestResult.rtpFragmentSizeSelect.value, "1200");
+assert.strictEqual(smoothestResult.idrCooldownSelect.value, "750");
 
 // Test 5 (Edge Case): 'custom' preset does not overwrite existing options
 const customResult = runPresetTest("custom");
