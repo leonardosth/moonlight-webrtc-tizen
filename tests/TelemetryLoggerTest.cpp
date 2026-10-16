@@ -72,7 +72,7 @@ int main()
                 client.framesDropped = 1;
                 client.droppedPerSec = 0.0;
                 client.packetsReceived = 1000 * (i + 1);
-                client.packetsLost = 0;
+                client.packetsLost = (i == 0) ? 0 : (i * 5); // 0, 5, 10, 15, 20
                 client.currentMbps = 49.5;
                 client.rvfcProcessingMs = 1.0 + i * 0.1;
                 client.rvfcExpectedDelayMs = 5.0 + i * 0.2;
@@ -90,6 +90,11 @@ int main()
                 host.keyframeRequestsReceived = 5;
                 host.keyframeRequestsForwarded = 2;
                 host.keyframeRequestsThrottled = 3;
+                host.pacerCatchUpEvents = 1;
+                host.pacerQueueDepth = 4;
+                host.nackRetransmittedPackets = 12;
+                host.nackSuppressedDuplicates = 3;
+                host.nackRateLimited = 1;
 
                 logger.recordTelemetry(42, client, host);
             }
@@ -129,6 +134,12 @@ int main()
         require(logContent.find("Keyframes Throttled:    3") != std::string::npos, "Log must contain Keyframes Throttled");
         require(logContent.find("dropGw: 2") != std::string::npos, "Log must contain dropGw in periodic line");
         require(logContent.find("idr: 5recv/2fwd/3throt") != std::string::npos, "Log must contain idr in periodic line");
+        require(logContent.find("lostPkts: 5 [+5]") != std::string::npos, "Log must contain packet loss delta in periodic line");
+        require(logContent.find("pacer: q:4/catchUp:1") != std::string::npos, "Log must contain pacer stats in periodic line");
+        require(logContent.find("nack: 12tx/3suppr/1lim") != std::string::npos, "Log must contain NACK limiter stats in periodic line");
+        require(logContent.find("Pacer Catch-Up Events:  1") != std::string::npos, "Log must contain Pacer Catch-Up Events in session end");
+        require(logContent.find("NACK Retransmissions:   12 (3 suppressed, 1 rate-limited)") != std::string::npos,
+                "Log must contain NACK retransmission totals in session end");
         require(logContent.find("p50:") != std::string::npos, "Log must contain p50 metric");
         require(logContent.find("p95:") != std::string::npos, "Log must contain p95 metric");
         require(logContent.find("p99:") != std::string::npos, "Log must contain p99 metric");

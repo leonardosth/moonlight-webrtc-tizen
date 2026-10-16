@@ -83,6 +83,11 @@ struct HostTelemetrySample {
     std::uint64_t keyframeRequestsReceived = 0;
     std::uint64_t keyframeRequestsForwarded = 0;
     std::uint64_t keyframeRequestsThrottled = 0;
+    std::uint64_t pacerQueueDepth = 0;
+    std::uint64_t pacerCatchUpEvents = 0;
+    std::uint64_t nackRetransmittedPackets = 0;
+    std::uint64_t nackSuppressedDuplicates = 0;
+    std::uint64_t nackRateLimited = 0;
 };
 
 struct MetricDistribution {
@@ -138,6 +143,8 @@ private:
         std::vector<double> rvfcDelaySamples;
         ClientTelemetrySample lastClientSample;
         std::optional<HostTelemetrySample> lastHostSample;
+        std::uint64_t lastPacketsLost = 0;
+        bool hasPreviousLossSample = false;
     };
 
     std::optional<ActiveSessionData> activeSession_;

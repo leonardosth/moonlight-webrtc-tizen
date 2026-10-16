@@ -1807,6 +1807,17 @@ private:
                     sample.keyframeRequestsReceived = diag->keyframeRequestsReceived;
                     sample.keyframeRequestsForwarded = diag->keyframeRequestsForwarded;
                     sample.keyframeRequestsThrottled = diag->keyframeRequestsThrottled;
+                    if (session->videoPacer) {
+                        const auto pacerStats = session->videoPacer->stats();
+                        sample.pacerQueueDepth = pacerStats.maxQueueDepth;
+                        sample.pacerCatchUpEvents = pacerStats.catchUpEvents;
+                    }
+                    if (session->nackLimiter) {
+                        const auto nackStats = session->nackLimiter->stats();
+                        sample.nackRetransmittedPackets = nackStats.retransmittedPackets;
+                        sample.nackSuppressedDuplicates = nackStats.duplicateNacksSuppressed;
+                        sample.nackRateLimited = nackStats.rateLimitedNacks;
+                    }
                     hostSample = sample;
                 }
             }

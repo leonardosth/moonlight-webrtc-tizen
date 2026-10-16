@@ -236,6 +236,7 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
                                      const std::optional<HostTelemetrySample>& hostSample)
 {
     const std::lock_guard lock(mutex_);
+    std::int64_t deltaLoss = 0;
 
     if (activeSession_ && activeSession_->params.sessionId == sessionId) {
         // Collect metrics into vectors for percentiles
@@ -257,6 +258,14 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
         if (clientSample.rvfcExpectedDelayMs > 0.0) {
             activeSession_->rvfcDelaySamples.push_back(clientSample.rvfcExpectedDelayMs);
         }
+
+        if (activeSession_->hasPreviousLossSample) {
+            if (clientSample.packetsLost >= activeSession_->lastPacketsLost) {
+                deltaLoss = static_cast<std::int64_t>(clientSample.packetsLost - activeSession_->lastPacketsLost);
+            }
+        }
+        activeSession_->lastPacketsLost = clientSample.packetsLost;
+        activeSession_->hasPreviousLossSample = true;
 
         if (hostSample) {
             if (hostSample->hostFps > 0.0f) {
@@ -296,6 +305,15 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
                << hostSample->keyframeRequestsForwarded << "fwd/"
                << hostSample->keyframeRequestsThrottled << "throt";
         }
+        if (hostSample->pacerCatchUpEvents > 0 || hostSample->pacerQueueDepth > 0) {
+            ss << ", pacer: q:" << hostSample->pacerQueueDepth
+               << "/catchUp:" << hostSample->pacerCatchUpEvents;
+        }
+        if (hostSample->nackRetransmittedPackets > 0 || hostSample->nackSuppressedDuplicates > 0 || hostSample->nackRateLimited > 0) {
+            ss << ", nack: " << hostSample->nackRetransmittedPackets << "tx/"
+               << hostSample->nackSuppressedDuplicates << "suppr/"
+               << hostSample->nackRateLimited << "lim";
+        }
         ss << ") | ";
     }
 
@@ -307,9 +325,13 @@ void TelemetryLogger::recordTelemetry(std::uint64_t sessionId,
     ss << "jit: " << clientSample.videoJitterMs << "ms, "
        << "rtt: " << clientSample.networkRttMs << "ms, "
        << "drop: " << clientSample.framesDropped
-       << (clientSample.droppedPerSec > 0 ? " [+" + std::to_string(clientSample.droppedPerSec) + "/s]" : "")
-       << ", lostPkts: " << clientSample.packetsLost << ", "
-       << "bitr: " << clientSample.currentMbps << " Mbps)\n";
+       << (clientSample.droppedPerSec > 0 ? " [+" + std::to_string(clientSample.droppedPerSec) + "/s]" : "");
+    if (deltaLoss > 0) {
+        ss << ", lostPkts: " << clientSample.packetsLost << " [+" << deltaLoss << "], ";
+    } else {
+        ss << ", lostPkts: " << clientSample.packetsLost << ", ";
+    }
+    ss << "bitr: " << clientSample.currentMbps << " Mbps)\n";
 
     writeLocked(ss.str());
 }
@@ -348,6 +370,10 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
     const auto totalFramesDecoded = lastClient.framesDecoded;
     const auto totalFramesDropped = lastClient.framesDropped;
     const auto totalPacketsLost = lastClient.packetsLost;
+    const auto totalPacerCatchUp = activeSession_->lastHostSample ? activeSession_->lastHostSample->pacerCatchUpEvents : 0;
+    const auto totalNackRetransmit = activeSession_->lastHostSample ? activeSession_->lastHostSample->nackRetransmittedPackets : 0;
+    const auto totalNackSuppressed = activeSession_->lastHostSample ? activeSession_->lastHostSample->nackSuppressedDuplicates : 0;
+    const auto totalNackRateLimited = activeSession_->lastHostSample ? activeSession_->lastHostSample->nackRateLimited : 0;
     const auto totalKeyframeRecv = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsReceived : 0;
     const auto totalKeyframeFwd = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsForwarded : 0;
     const auto totalKeyframeThrot = activeSession_->lastHostSample ? activeSession_->lastHostSample->keyframeRequestsThrottled : 0;
@@ -371,6 +397,9 @@ void TelemetryLogger::logSessionEnd(std::uint64_t sessionId)
        << std::fixed << std::setprecision(2) << dropRate << "% drop rate)\n"
        << "  Gateway Late Drops:     " << totalLateDrops << "\n"
        << "  Packets Lost (RTP):     " << totalPacketsLost << "\n"
+       << "  Pacer Catch-Up Events:  " << totalPacerCatchUp << "\n"
+       << "  NACK Retransmissions:   " << totalNackRetransmit << " ("
+       << totalNackSuppressed << " suppressed, " << totalNackRateLimited << " rate-limited)\n"
        << "  Keyframe Requests (TV): " << totalKeyframeRecv << "\n"
        << "  Keyframes Forwarded:    " << totalKeyframeFwd << "\n"
        << "  Keyframes Throttled:    " << totalKeyframeThrot << " (Suppressed by rate limiter)\n\n"
